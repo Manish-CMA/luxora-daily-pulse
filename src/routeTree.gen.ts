@@ -17,6 +17,7 @@ import { Route as AuthenticatedDailyRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedTcSchedulerRouteImport } from './routes/_authenticated/tc-scheduler'
 
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
@@ -57,6 +58,12 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedTcSchedulerRoute =
+  AuthenticatedTcSchedulerRouteImport.update({
+    id: '/tc-scheduler',
+    path: '/tc-scheduler',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -66,6 +73,7 @@ export interface FileRoutesByFullPath {
   '/history': typeof AuthenticatedHistoryRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/tc-scheduler': typeof AuthenticatedTcSchedulerRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
@@ -74,6 +82,7 @@ export interface FileRoutesByTo {
   '/history': typeof AuthenticatedHistoryRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/tc-scheduler': typeof AuthenticatedTcSchedulerRoute
   '/': typeof AuthenticatedIndexRoute
 }
 export interface FileRoutesById {
@@ -85,15 +94,30 @@ export interface FileRoutesById {
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/tc-scheduler': typeof AuthenticatedTcSchedulerRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/auth' | '/agents' | '/daily' | '/history' | '/reports' | '/settings'
+    | '/'
+    | '/auth'
+    | '/agents'
+    | '/daily'
+    | '/history'
+    | '/reports'
+    | '/settings'
+    | '/tc-scheduler'
   fileRoutesByTo: FileRoutesByTo
   to:
-    '/auth' | '/agents' | '/daily' | '/history' | '/reports' | '/settings' | '/'
+    | '/auth'
+    | '/agents'
+    | '/daily'
+    | '/history'
+    | '/reports'
+    | '/settings'
+    | '/tc-scheduler'
+    | '/'
   id:
     | '__root__'
     | '/_authenticated'
@@ -103,6 +127,7 @@ export interface FileRouteTypes {
     | '/_authenticated/history'
     | '/_authenticated/reports'
     | '/_authenticated/settings'
+    | '/_authenticated/tc-scheduler'
     | '/_authenticated/'
   fileRoutesById: FileRoutesById
 }
@@ -169,6 +194,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/tc-scheduler': {
+      id: '/_authenticated/tc-scheduler'
+      path: '/tc-scheduler'
+      fullPath: '/tc-scheduler'
+      preLoaderRoute: typeof AuthenticatedTcSchedulerRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
@@ -178,6 +210,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedHistoryRoute: typeof AuthenticatedHistoryRoute
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedTcSchedulerRoute: typeof AuthenticatedTcSchedulerRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
@@ -187,6 +220,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedHistoryRoute: AuthenticatedHistoryRoute,
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedTcSchedulerRoute: AuthenticatedTcSchedulerRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }
 

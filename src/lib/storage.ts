@@ -32,6 +32,30 @@ const MIGRATED_KEY = "cureme-cloud-migrated-v1";
 
 const isBrowser = () => typeof window !== "undefined";
 
+const toMetric = (value: unknown): number => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.trunc(value));
+};
+
+/** Upgrade old/local agent rows and guarantee every metric is present. */
+function normalizeAgent(agent: Partial<Agent>): Agent {
+  const name = typeof agent.name === "string" ? agent.name : "";
+  const id = typeof agent.id === "string" && agent.id ? agent.id : undefined;
+  const base = newAgent(name, id);
+
+  return {
+    ...base,
+    callsMade: toMetric(agent.callsMade),
+    callsPicked: toMetric(agent.callsPicked),
+    preTc: toMetric(agent.preTc),
+    preTcToTc: toMetric(agent.preTcToTc),
+    directTc: toMetric(agent.directTc),
+  };
+}
+
+const normalizeAgents = (agents: Partial<Agent>[] | undefined): Agent[] =>
+  Array.isArray(agents) ? agents.map(normalizeAgent) : [];
+
 /* ---------------- In-memory shared cache ---------------- */
 
 let rosterCache: RosterAgent[] = [];
@@ -64,6 +88,8 @@ type ReportRow = {
   submitted_at: string;
   last_edited_by_name: string | null;
   last_edited_at: string | null;
+  tc_scheduled: number | null;
+  tc_done: number | null;
 };
 
 type EntryRow = {
@@ -81,20 +107,24 @@ function toSavedReports(rows: ReportRow[], entries: EntryRow[]): SavedReport[] {
   const byReport = new Map<string, Agent[]>();
   for (const e of entries) {
     const list = byReport.get(e.report_id) ?? [];
-    list.push({
-      id: e.agent_id ?? crypto.randomUUID(),
-      name: e.agent_name,
-      callsMade: e.calls_made,
-      callsPicked: e.calls_picked,
-      preTc: e.pre_tc,
-      preTcToTc: e.pre_tc_to_tc,
-      directTc: e.direct_tc,
-    });
+    list.push(
+      normalizeAgent({
+        id: e.agent_id ?? undefined,
+        name: e.agent_name,
+        callsMade: e.calls_made,
+        callsPicked: e.calls_picked,
+        preTc: e.pre_tc,
+        preTcToTc: e.pre_tc_to_tc,
+        directTc: e.direct_tc,
+      }),
+    );
     byReport.set(e.report_id, list);
   }
   return rows.map((r) => ({
     date: r.report_date,
     agents: byReport.get(r.id) ?? [],
+    tcScheduled: toMetric(r.tc_scheduled),
+    tcDone: toMetric(r.tc_done),
     submittedAt: r.submitted_at,
     ...(r.submitted_by_name ? { submittedBy: r.submitted_by_name } : {}),
     status: (r.status as ReportStatus) ?? "submitted",
@@ -110,7 +140,7 @@ async function loadFromCloud() {
       supabase
         .from("daily_reports")
         .select(
-          "id, report_date, status, submitted_by_name, submitted_at, last_edited_by_name, last_edited_at",
+          "id, report_date, status, submitted_by_name, submitted_at, last_edited_by_name, last_edited_at, tc_scheduled, tc_done",
         )
         .order("report_date", { ascending: false }),
       supabase
@@ -133,7 +163,10 @@ async function loadFromCloud() {
 
 async function seedDefaultAgents() {
   const rows = DEFAULT_AGENT_NAMES.map((name) => ({ name, active: true }));
-  const { data } = await supabase.from("agents").insert(rows).select("id, name, active");
+  const { data } = await supabase
+    .from("agents")
+    .insert(rows)
+    .select("id, name, active");
   rosterCache = (data ?? []).map((a) => ({
     id: a.id,
     name: a.name,
@@ -160,11 +193,18 @@ async function migrateLocalData() {
     }
 
     const rawReports = localStorage.getItem(LEGACY_REPORTS_KEY);
-    const localReports: SavedReport[] = rawReports ? JSON.parse(rawReports) : [];
+    const localReports: SavedReport[] = rawReports
+      ? JSON.parse(rawReports)
+      : [];
     const existingDates = new Set(reportsCache.map((r) => r.date));
     for (const rep of localReports) {
       if (existingDates.has(rep.date)) continue;
-      await persistReport(rep);
+      await persistReport({
+        ...rep,
+        agents: normalizeAgents(rep.agents),
+        tcScheduled: toMetric(rep.tcScheduled),
+        tcDone: toMetric(rep.tcDone),
+      });
       didWork = true;
     }
   } catch (e) {
@@ -217,7 +257,10 @@ export function saveRoster(list: RosterAgent[]) {
         await supabase
           .from("agents")
           .delete()
-          .in("id", removed.map((r) => r.id));
+          .in(
+            "id",
+            removed.map((r) => r.id),
+          );
       if (list.length > 0)
         await supabase.from("agents").upsert(
           list.map((r) => ({
@@ -243,7 +286,9 @@ export function syncAgentsWithRoster(
     .filter((r) => r.active)
     .map((r) => {
       const prev = existing.find((a) => a.id === r.id);
-      return prev ? { ...prev, name: r.name } : newAgent(r.name, r.id);
+      return prev
+        ? normalizeAgent({ ...prev, id: r.id, name: r.name })
+        : newAgent(r.name, r.id);
     });
 }
 
@@ -285,6 +330,8 @@ async function persistReport(report: SavedReport) {
         last_edited_by: report.lastEditedAt ? uid : null,
         last_edited_by_name: report.lastEditedBy ?? null,
         last_edited_at: report.lastEditedAt ?? null,
+        tc_scheduled: toMetric(report.tcScheduled),
+        tc_done: toMetric(report.tcDone),
       },
       { onConflict: "report_date" },
     )
@@ -292,10 +339,14 @@ async function persistReport(report: SavedReport) {
     .single();
   if (error || !saved) throw error ?? new Error("Report not saved");
 
-  await supabase.from("daily_report_entries").delete().eq("report_id", saved.id);
-  if (report.agents.length > 0)
+  await supabase
+    .from("daily_report_entries")
+    .delete()
+    .eq("report_id", saved.id);
+  const normalizedAgents = normalizeAgents(report.agents);
+  if (normalizedAgents.length > 0)
     await supabase.from("daily_report_entries").insert(
-      report.agents.map((a) => ({
+      normalizedAgents.map((a) => ({
         report_id: saved.id,
         agent_id: isUuid(a.id) ? a.id : null,
         agent_name: a.name,
@@ -315,12 +366,16 @@ export function saveReport(
 ) {
   const existing = reportsCache.find((r) => r.date === report.date);
   const by = (submittedBy ?? "").trim();
-  if (by && isBrowser()) localStorage.setItem(SUBMITTER_KEY, JSON.stringify(by));
+  if (by && isBrowser())
+    localStorage.setItem(SUBMITTER_KEY, JSON.stringify(by));
   const now = new Date().toISOString();
   const isEdit = mode === "edit" && Boolean(existing);
 
   const next: SavedReport = {
     ...report,
+    agents: normalizeAgents(report.agents),
+    tcScheduled: toMetric(report.tcScheduled),
+    tcDone: toMetric(report.tcDone),
     submittedAt: isEdit ? (existing?.submittedAt ?? now) : now,
     ...(isEdit
       ? existing?.submittedBy
@@ -332,7 +387,9 @@ export function saveReport(
         ? { submittedBy: by }
         : {}),
     status: isEdit ? "edited" : "submitted",
-    ...(isEdit ? { lastEditedAt: now, ...(by ? { lastEditedBy: by } : {}) } : {}),
+    ...(isEdit
+      ? { lastEditedAt: now, ...(by ? { lastEditedBy: by } : {}) }
+      : {}),
   };
 
   reportsCache = [...reportsCache.filter((r) => r.date !== report.date), next];
@@ -397,31 +454,52 @@ export function validateReport(state: DashboardState): string[] {
   }
 
   const hasData = named.some(
-    (a) =>
-      a.callsMade ||
-      a.callsPicked ||
-      a.preTc ||
-      a.preTcToTc ||
-      a.directTc,
+    (a) => a.callsMade || a.callsPicked || a.preTc || a.preTcToTc || a.directTc,
   );
 
-  if (!hasData) {
-    errors.push("Enter performance data for at least one agent.");
+  if (!hasData && !state.tcScheduled && !state.tcDone) {
+    errors.push("Enter agent performance or daily TC totals.");
+  }
+
+  const tcTotals = [state.tcScheduled, state.tcDone];
+  if (
+    tcTotals.some(
+      (value) =>
+        typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        value < 0 ||
+        !Number.isInteger(value),
+    )
+  ) {
+    errors.push("TC Scheduled and TC Done must be non-negative whole numbers.");
+  } else if (state.tcDone > state.tcScheduled) {
+    errors.push("TC Done cannot exceed TC Scheduled.");
   }
 
   for (const a of named) {
-    // Calls picked cannot exceed calls made
-    if (a.callsPicked > a.callsMade) {
-      errors.push(`${a.name}: calls picked cannot exceed calls made.`);
-    }
+    const values = [
+      a.callsMade,
+      a.callsPicked,
+      a.preTc,
+      a.preTcToTc,
+      a.directTc,
+    ];
 
-    // Only check for negative/invalid values
     if (
-      [a.callsMade, a.callsPicked, a.preTc, a.preTcToTc, a.directTc].some(
-        (n) => n < 0 || !Number.isFinite(n),
+      values.some(
+        (value) =>
+          typeof value !== "number" ||
+          !Number.isFinite(value) ||
+          value < 0 ||
+          !Number.isInteger(value),
       )
     ) {
-      errors.push(`${a.name}: values must be positive numbers.`);
+      errors.push(`${a.name}: values must be non-negative whole numbers.`);
+      continue;
+    }
+
+    if (a.callsPicked > a.callsMade) {
+      errors.push(`${a.name}: calls picked cannot exceed calls made.`);
     }
   }
 

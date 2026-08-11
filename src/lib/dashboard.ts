@@ -11,6 +11,8 @@ export type Agent = {
 export type DashboardState = {
   date: string; // yyyy-MM-dd
   agents: Agent[];
+  tcScheduled: number;
+  tcDone: number;
 };
 
 export const NUMERIC_FIELDS = [
@@ -39,8 +41,19 @@ export const DEFAULT_AGENT_NAMES = [
   "Aman",
 ];
 
+function createId(): string {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export const newAgent = (name = "", id?: string): Agent => ({
-  id: id ?? crypto.randomUUID(),
+  id: id ?? createId(),
   name,
   callsMade: 0,
   callsPicked: 0,
@@ -49,113 +62,167 @@ export const newAgent = (name = "", id?: string): Agent => ({
   directTc: 0,
 });
 
-export const todayIso = () => new Date().toISOString().slice(0, 10);
+export function todayIso(): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) return new Date().toISOString().slice(0, 10);
+  return `${year}-${month}-${day}`;
+}
 
 export const defaultState = (): DashboardState => ({
   date: todayIso(),
   agents: [],
+  tcScheduled: 0,
+  tcDone: 0,
 });
 
 export type Totals = Record<NumericField, number> & {
   totalTcsLinedUp: number;
+  totalTcScheduled: number;
+  totalTcDone: number;
   pendingPreTc: number;
   pickupRate: number;
   preTcToTcRate: number;
+  tcCompletionRate: number;
 };
 
-export function computeTotals(agents: Agent[]): Totals {
-  const sum = (f: NumericField) => agents.reduce((a, b) => a + (b[f] || 0), 0);
-  const t = {
-    callsMade: sum("callsMade"),
-    callsPicked: sum("callsPicked"),
-    preTc: sum("preTc"),
-    preTcToTc: sum("preTcToTc"),
-    directTc: sum("directTc"),
-  };
-  const pct = (a: number, b: number) => (b > 0 ? (a / b) * 100 : 0);
+export function computeTotals(
+  agents: Agent[],
+  tcScheduled = 0,
+  tcDone = 0,
+): Totals {
+  const sum = (field: NumericField) =>
+    agents.reduce((total, agent) => total + (agent[field] || 0), 0);
+
+  const callsMade = sum("callsMade");
+  const callsPicked = sum("callsPicked");
+  const preTc = sum("preTc");
+  const preTcToTc = sum("preTcToTc");
+  const directTc = sum("directTc");
+  const scheduled = Math.max(0, Number.isFinite(tcScheduled) ? tcScheduled : 0);
+  const done = Math.max(0, Number.isFinite(tcDone) ? tcDone : 0);
+  const percentage = (value: number, total: number) =>
+    total > 0 ? (value / total) * 100 : 0;
 
   return {
-    ...t,
-    totalTcsLinedUp: t.preTcToTc + t.directTc,
-    pendingPreTc: Math.max(0, t.preTc - t.preTcToTc),
-    pickupRate: pct(t.callsPicked, t.callsMade),
-    preTcToTcRate: pct(t.preTcToTc, t.preTc),
+    callsMade,
+    callsPicked,
+    preTc,
+    preTcToTc,
+    directTc,
+    totalTcsLinedUp: preTcToTc + directTc,
+    totalTcScheduled: scheduled,
+    totalTcDone: done,
+    pendingPreTc: Math.max(0, preTc - preTcToTc),
+    pickupRate: percentage(callsPicked, callsMade),
+    preTcToTcRate: percentage(preTcToTc, preTc),
+    tcCompletionRate: percentage(done, scheduled),
   };
-} // <-- THIS BRACE WAS MISSING
-
-export const agentTcsLinedUp = (a: Agent) => a.preTcToTc + a.directTc;
-
-export const agentPreTcLinedUp = (a: Agent) =>
-  Math.max(0, a.preTc - a.preTcToTc);
-
-export function topPerformer(agents: Agent[]): Agent | null {
-  const named = agents.filter((a) => a.name.trim().length > 0);
-  if (named.length === 0) return null;
-  const sorted = [...named].sort(
-    (a, b) =>
-      agentTcsLinedUp(b) - agentTcsLinedUp(a) ||
-      b.preTcToTc - a.preTcToTc ||
-      b.callsPicked - a.callsPicked,
-  );
-  const best = sorted[0];
-  if (!best) return null;
-  const hasData =
-    best.preTcToTc > 0 || best.directTc > 0 || best.callsPicked > 0;
-  return hasData ? best : null;
 }
 
-/** Ranked list of agents with data, using the top-performer ordering. */
+export const agentTcsLinedUp = (agent: Agent) =>
+  agent.preTcToTc + agent.directTc;
+
+export const agentPreTcLinedUp = (agent: Agent) =>
+  Math.max(0, agent.preTc - agent.preTcToTc);
+
+/** Human team members with at least one recorded performance metric. */
+export function activeHumanAgents(agents: Agent[]): Agent[] {
+  return agents.filter((agent) => {
+    const normalizedName = agent.name.replace(/\s+/g, " ").trim().toLowerCase();
+    if (!normalizedName || normalizedName === "ai bot") return false;
+    return NUMERIC_FIELDS.some((field) => (agent[field] || 0) > 0);
+  });
+}
+
+function hasPerformanceData(agent: Agent): boolean {
+  return agent.callsPicked > 0 || agent.preTcToTc > 0 || agent.directTc > 0;
+}
+
+function compareAgentPerformance(a: Agent, b: Agent): number {
+  return (
+    agentTcsLinedUp(b) - agentTcsLinedUp(a) ||
+    b.preTcToTc - a.preTcToTc ||
+    b.callsPicked - a.callsPicked ||
+    a.name.localeCompare(b.name)
+  );
+}
+
+export function topPerformer(agents: Agent[]): Agent | null {
+  return (
+    agents
+      .filter(
+        (agent) => agent.name.trim().length > 0 && hasPerformanceData(agent),
+      )
+      .sort(compareAgentPerformance)[0] ?? null
+  );
+}
+
 export function topPerformers(agents: Agent[], count = 3): Agent[] {
   return agents
     .filter(
-      (a) =>
-        a.name.trim().length > 0 &&
-        (a.preTcToTc > 0 || a.directTc > 0 || a.callsPicked > 0),
+      (agent) => agent.name.trim().length > 0 && hasPerformanceData(agent),
     )
-    .sort(
-      (a, b) =>
-        agentTcsLinedUp(b) - agentTcsLinedUp(a) ||
-        b.preTcToTc - a.preTcToTc ||
-        b.callsPicked - a.callsPicked,
-    )
-    .slice(0, count);
+    .sort(compareAgentPerformance)
+    .slice(0, Math.max(0, count));
 }
 
 export function leader(agents: Agent[], field: NumericField): Agent | null {
-  const named = agents.filter((a) => a.name.trim().length > 0 && a[field] > 0);
-  if (named.length === 0) return null;
-  return named.reduce((a, b) => (b[field] > a[field] ? b : a));
+  const eligible = agents.filter(
+    (agent) => agent.name.trim().length > 0 && agent[field] > 0,
+  );
+  if (eligible.length === 0) return null;
+  return eligible.reduce((current, agent) =>
+    agent[field] > current[field] ? agent : current,
+  );
 }
 
-/** Merge multiple daily agent rows into one aggregated row per agent name. */
 export function aggregateAgents(rows: Agent[][]): Agent[] {
-  const map = new Map<string, Agent>();
-  for (const day of rows) {
-    for (const a of day) {
-      if (!a.name.trim()) continue;
-      const key = a.id || a.name;
-      const cur = map.get(key) ?? newAgent(a.name, a.id);
-      map.set(key, {
-        ...cur,
-        name: a.name,
-        callsMade: cur.callsMade + (a.callsMade || 0),
-        callsPicked: cur.callsPicked + (a.callsPicked || 0),
-        preTc: cur.preTc + (a.preTc || 0),
-        preTcToTc: cur.preTcToTc + (a.preTcToTc || 0),
-        directTc: cur.directTc + (a.directTc || 0),
+  const agentsByName = new Map<string, Agent>();
+
+  for (const dailyAgents of rows) {
+    for (const agent of dailyAgents) {
+      const trimmedName = agent.name.trim();
+      if (!trimmedName) continue;
+
+      const key = trimmedName.toLocaleLowerCase();
+      const current = agentsByName.get(key) ?? newAgent(trimmedName, agent.id);
+
+      agentsByName.set(key, {
+        ...current,
+        name: trimmedName,
+        callsMade: current.callsMade + (agent.callsMade || 0),
+        callsPicked: current.callsPicked + (agent.callsPicked || 0),
+        preTc: current.preTc + (agent.preTc || 0),
+        preTcToTc: current.preTcToTc + (agent.preTcToTc || 0),
+        directTc: current.directTc + (agent.directTc || 0),
       });
     }
   }
-  return [...map.values()];
+
+  return [...agentsByName.values()].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
 }
 
-export const fmtPct = (n: number) => `${n.toFixed(1)}%`;
+export const fmtPct = (value: number) =>
+  `${Number.isFinite(value) ? value.toFixed(1) : "0.0"}%`;
 
-export function fmtDate(iso: string) {
+export function fmtDate(iso: string): string {
   if (!iso) return "—";
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", {
+  const date = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+
+  return date.toLocaleDateString("en-GB", {
     weekday: "long",
     day: "numeric",
     month: "long",

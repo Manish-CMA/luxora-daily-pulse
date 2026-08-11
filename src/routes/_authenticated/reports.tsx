@@ -10,6 +10,9 @@ import {
   Percent,
   Target,
   Trophy,
+  CalendarDays,
+  CheckCircle2,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -26,6 +29,7 @@ import { Leaderboard } from "@/components/dashboard/Leaderboard";
 import {
   COLUMNS,
   agentTcsLinedUp,
+  activeHumanAgents,
   aggregateAgents,
   computeTotals,
   fmtDate,
@@ -38,13 +42,13 @@ import { getReports, onStoreChange, type SavedReport } from "@/lib/storage";
 export const Route = createFileRoute("/_authenticated/reports")({
   head: () => ({
     meta: [
-      { title: "Reports | CureMe Abroad TC Dashboard" },
+      { title: "Reports | CureMeAbroad TC Dashboard" },
       {
         name: "description",
         content:
           "Daily, weekly, monthly and custom-range teleconsultation reports with team summaries, conversion rates and leaderboards.",
       },
-      { property: "og:title", content: "Reports — CureMe Abroad TC Dashboard" },
+      { property: "og:title", content: "Reports — CureMeAbroad TC Dashboard" },
       {
         property: "og:description",
         content:
@@ -62,8 +66,71 @@ type Preset = "daily" | "weekly" | "monthly" | "custom";
 const shift = (iso: string, days: number) => {
   const d = new Date(`${iso}T00:00:00`);
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return format(d, "yyyy-MM-dd");
 };
+
+const csvCell = (value: string | number) =>
+  `"${String(value).replace(/"/g, '""')}"`;
+
+function downloadPeriodCsv(reports: SavedReport[], from: string, to: string) {
+  const headers = [
+    "Date",
+    "Reports Included",
+    "Calls Made",
+    "Calls Picked",
+    "Pickup Rate",
+    "Pre-TC",
+    "Pre-TC to TC",
+    "Pre-TC to TC Rate",
+    "Direct TC",
+    "Pending Pre-TC",
+    "TCs Lined Up",
+    "TC Scheduled",
+    "TC Done",
+    "TC Completion Rate",
+  ];
+
+  const dataRows = [...reports]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((report) => {
+      const totals = computeTotals(
+        report.agents,
+        report.tcScheduled,
+        report.tcDone,
+      );
+
+      return [
+        format(new Date(`${report.date}T00:00:00`), "dd/MM/yyyy"),
+        1,
+        totals.callsMade,
+        totals.callsPicked,
+        fmtPct(totals.pickupRate),
+        totals.preTc,
+        totals.preTcToTc,
+        fmtPct(totals.preTcToTcRate),
+        totals.directTc,
+        totals.pendingPreTc,
+        totals.totalTcsLinedUp,
+        totals.totalTcScheduled,
+        totals.totalTcDone,
+        fmtPct(totals.tcCompletionRate),
+      ];
+    });
+
+  const csv = [headers, ...dataRows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n");
+
+  const blob = new Blob([`\uFEFF${csv}`], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `CureMe-Abroad-Reports-${from}-to-${to}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 function DatePick({
   value,
@@ -142,7 +209,15 @@ function ReportsPage() {
     () => aggregateAgents(range.map((r) => r.agents)),
     [range],
   );
-  const totals = useMemo(() => computeTotals(periodAgents), [periodAgents]);
+  const totals = useMemo(
+    () =>
+      computeTotals(
+        periodAgents,
+        range.reduce((sum, report) => sum + (report.tcScheduled || 0), 0),
+        range.reduce((sum, report) => sum + (report.tcDone || 0), 0),
+      ),
+    [periodAgents, range],
+  );
   const overallTop = useMemo(() => topPerformer(periodAgents), [periodAgents]);
 
   const [selectedDate, setSelectedDate] = useState<string>("");
@@ -155,13 +230,25 @@ function ReportsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <AppHeader />
+      <AppHeader
+        actions={
+          <Button
+            variant="outline"
+            className="rounded-xl"
+            disabled={range.length === 0}
+            onClick={() => downloadPeriodCsv(range, from, to)}
+          >
+            <Download className="size-4" />
+            Export CSV
+          </Button>
+        }
+      />
       <main className="mx-auto max-w-7xl space-y-8 px-6 py-8">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Reports</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {range.length} submitted report{range.length === 1 ? "" : "s"} in the
-            selected period.
+            {range.length} submitted report{range.length === 1 ? "" : "s"} in
+            the selected period.
           </p>
         </div>
 
@@ -171,17 +258,19 @@ function ReportsPage() {
               Period
             </Label>
             <div className="flex flex-wrap gap-2">
-              {(["daily", "weekly", "monthly", "custom"] as Preset[]).map((p) => (
-                <Button
-                  key={p}
-                  size="sm"
-                  variant={preset === p ? "default" : "outline"}
-                  className="rounded-xl capitalize"
-                  onClick={() => applyPreset(p)}
-                >
-                  {p === "custom" ? "Custom Range" : p}
-                </Button>
-              ))}
+              {(["daily", "weekly", "monthly", "custom"] as Preset[]).map(
+                (p) => (
+                  <Button
+                    key={p}
+                    size="sm"
+                    variant={preset === p ? "default" : "outline"}
+                    className="rounded-xl capitalize"
+                    onClick={() => applyPreset(p)}
+                  >
+                    {p === "custom" ? "Custom Range" : p}
+                  </Button>
+                ),
+              )}
             </div>
           </div>
           <div className="space-y-2">
@@ -201,17 +290,91 @@ function ReportsPage() {
               ))}
             </select>
           </div>
-          <DatePick label="From" value={from} onChange={(v) => { setFrom(v); setPreset("custom"); }} />
-          <DatePick label="To" value={to} onChange={(v) => { setTo(v); setPreset("custom"); }} />
+          <DatePick
+            label="From"
+            value={from}
+            onChange={(v) => {
+              setFrom(v);
+              setPreset("custom");
+            }}
+          />
+          <DatePick
+            label="To"
+            value={to}
+            onChange={(v) => {
+              setTo(v);
+              setPreset("custom");
+            }}
+          />
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <KpiCard label="Total Calls Made" value={totals.callsMade} icon={Phone} tone="primary" />
-          <KpiCard label="Calls Picked" value={totals.callsPicked} icon={PhoneCall} tone="primary" />
-          <KpiCard label="Total Pre-TCs" value={totals.preTc} icon={ClipboardList} tone="default" />
-          <KpiCard label="Pre-TC → TC" value={totals.preTcToTc} icon={ArrowRightLeft} tone="success" />
-          <KpiCard label="Total TCs Lined Up" value={totals.totalTcsLinedUp} icon={Target} tone="default" />
-          <KpiCard label="Pickup Rate" value={fmtPct(totals.pickupRate)} icon={Percent} tone="primary" />
+          <KpiCard
+            label="Total Calls Made"
+            value={totals.callsMade}
+            icon={Phone}
+            tone="primary"
+          />
+          <KpiCard
+            label="Calls Picked"
+            value={totals.callsPicked}
+            icon={PhoneCall}
+            tone="primary"
+          />
+          <KpiCard
+            label="Total Pre-TCs"
+            value={totals.preTc}
+            icon={ClipboardList}
+            tone="default"
+          />
+          <KpiCard
+            label="Pending Pre-TC"
+            value={totals.pendingPreTc}
+            icon={ClipboardList}
+            tone="warning"
+          />
+          <KpiCard
+            label="Pre-TC → TC"
+            value={totals.preTcToTc}
+            icon={ArrowRightLeft}
+            tone="success"
+          />
+          <KpiCard
+            label="Total TCs Lined Up"
+            value={totals.totalTcsLinedUp}
+            icon={Target}
+            tone="default"
+          />
+          <KpiCard
+            label="TC Scheduled"
+            value={totals.totalTcScheduled}
+            icon={CalendarDays}
+            tone="primary"
+          />
+          <KpiCard
+            label="TC Done"
+            value={totals.totalTcDone}
+            icon={CheckCircle2}
+            tone="success"
+          />
+          <KpiCard
+            label="Pickup Rate"
+            value={fmtPct(totals.pickupRate)}
+            icon={Percent}
+            tone="primary"
+          />
+          <KpiCard
+            label="Pre-TC → TC Rate"
+            value={fmtPct(totals.preTcToTcRate)}
+            icon={Percent}
+            tone="success"
+          />
+          <KpiCard
+            label="TC Completion Rate"
+            value={fmtPct(totals.tcCompletionRate)}
+            icon={Percent}
+            tone="success"
+          />
         </section>
 
         <section className="grid gap-6 lg:grid-cols-2">
@@ -224,9 +387,13 @@ function ReportsPage() {
                 ["Reports Included", range.length],
                 ["Total Pre-TCs", totals.preTc],
                 ["Total Pre-TC → TC", totals.preTcToTc],
+                ["Pending Pre-TC", totals.pendingPreTc],
                 ["Total Direct TC", totals.directTc],
                 ["Total TCs Lined Up", totals.totalTcsLinedUp],
-                ["Active Agents", periodAgents.length],
+                ["TC Scheduled", totals.totalTcScheduled],
+                ["TC Done", totals.totalTcDone],
+                ["TC Completion Rate", fmtPct(totals.tcCompletionRate)],
+                ["Active Agents", activeHumanAgents(periodAgents).length],
               ].map(([k, v]) => (
                 <div
                   key={String(k)}
@@ -245,13 +412,28 @@ function ReportsPage() {
             </h3>
             <div className="mt-4 space-y-4">
               {[
-                { label: "Pickup Rate", value: totals.pickupRate, tone: "bg-primary" },
-                { label: "Pre-TC → TC", value: totals.preTcToTcRate, tone: "bg-success" },
+                {
+                  label: "Pickup Rate",
+                  value: totals.pickupRate,
+                  tone: "bg-primary",
+                },
+                {
+                  label: "Pre-TC → TC",
+                  value: totals.preTcToTcRate,
+                  tone: "bg-success",
+                },
+                {
+                  label: "TC Completion Rate",
+                  value: totals.tcCompletionRate,
+                  tone: "bg-success",
+                },
               ].map((r) => (
                 <div key={r.label}>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{r.label}</span>
-                    <span className="font-semibold tabular-nums">{fmtPct(r.value)}</span>
+                    <span className="font-semibold tabular-nums">
+                      {fmtPct(r.value)}
+                    </span>
                   </div>
                   <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-secondary">
                     <div
@@ -296,8 +478,12 @@ function ReportsPage() {
                 {c.agent ? (
                   <p className="mt-1 text-sm text-muted-foreground">
                     TCs Lined Up:{" "}
-                    <b className="text-foreground">{agentTcsLinedUp(c.agent)}</b>{" "}
-                    · Calls Picked:{" "}
+                    <b className="text-foreground">
+                      {agentTcsLinedUp(c.agent)}
+                    </b>
+                    {" · "}Pre-TC → TC:{" "}
+                    <b className="text-foreground">{c.agent.preTcToTc}</b>
+                    {" · "}Calls Picked:{" "}
                     <b className="text-foreground">{c.agent.callsPicked}</b>
                   </p>
                 ) : null}
@@ -318,7 +504,7 @@ function ReportsPage() {
             Agent Totals
           </h3>
           <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-soft">
-            <table className="w-full min-w-[860px] border-collapse text-sm">
+            <table className="w-full min-w-[1400px] border-collapse text-sm">
               <thead>
                 <tr className="bg-secondary/60 text-left">
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -342,7 +528,10 @@ function ReportsPage() {
                   <tr key={a.id} className="border-t border-border">
                     <td className="px-4 py-2.5 font-medium">{a.name}</td>
                     {COLUMNS.map((c) => (
-                      <td key={c.key} className="px-3 py-2.5 text-right tabular-nums">
+                      <td
+                        key={c.key}
+                        className="px-3 py-2.5 text-right tabular-nums"
+                      >
                         {a[c.key]}
                       </td>
                     ))}
@@ -358,6 +547,22 @@ function ReportsPage() {
                       className="px-4 py-10 text-center text-sm text-muted-foreground"
                     >
                       No submitted reports in this period.
+                    </td>
+                  </tr>
+                ) : null}
+                {periodAgents.length > 0 ? (
+                  <tr className="border-t-2 border-border bg-secondary/70 font-semibold">
+                    <td className="px-4 py-3">Team Total</td>
+                    {COLUMNS.map((column) => (
+                      <td
+                        key={column.key}
+                        className="px-3 py-3 text-right tabular-nums text-primary"
+                      >
+                        {totals[column.key]}
+                      </td>
+                    ))}
+                    <td className="px-3 py-3 text-right tabular-nums text-primary">
+                      {totals.totalTcsLinedUp}
                     </td>
                   </tr>
                 ) : null}

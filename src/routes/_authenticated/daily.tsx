@@ -77,13 +77,16 @@ import {
 export const Route = createFileRoute("/_authenticated/daily")({
   head: () => ({
     meta: [
-      { title: "New Daily Report | CureMe Abroad TC Dashboard" },
+      { title: "New Daily Report | CureMeAbroad TC Dashboard" },
       {
         name: "description",
         content:
           "Enter daily teleconsultation coordinator performance, submit the report and generate a shareable operations dashboard.",
       },
-      { property: "og:title", content: "New Daily Report — CureMe Abroad TC Dashboard" },
+      {
+        property: "og:title",
+        content: "New Daily Report — CureMeAbroad TC Dashboard",
+      },
       {
         property: "og:description",
         content:
@@ -124,14 +127,22 @@ function DailyPage() {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as DashboardState;
-        if (parsed && Array.isArray(parsed.agents)) draft = parsed;
+        if (parsed && Array.isArray(parsed.agents)) {
+          draft = {
+            ...defaultState(),
+            ...parsed,
+            agents: parsed.agents,
+            tcScheduled: Number(parsed.tcScheduled) || 0,
+            tcDone: Number(parsed.tcDone) || 0,
+          };
+        }
       }
     } catch {
       /* ignore */
     }
     const existing = getReportByDate(draft.date);
     if (existing) {
-      setState({ date: existing.date, agents: existing.agents });
+      setState(existing);
     } else {
       draft.agents = syncAgentsWithRoster(getRoster(), draft.agents);
       setState(draft);
@@ -158,7 +169,10 @@ function DailyPage() {
     localStorage.setItem(DRAFT_KEY, JSON.stringify(state));
   }, [state, hydrated, locked]);
 
-  const totals = useMemo(() => computeTotals(state.agents), [state.agents]);
+  const totals = useMemo(
+    () => computeTotals(state.agents, state.tcScheduled, state.tcDone),
+    [state.agents, state.tcScheduled, state.tcDone],
+  );
   const top = useMemo(() => topPerformer(state.agents), [state.agents]);
   const status = submitted ? reportStatus(saved) : "draft";
 
@@ -168,6 +182,18 @@ function DailyPage() {
       agents: s.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)),
     }));
   }, []);
+
+  const updateTcTotal = useCallback(
+    (field: "tcScheduled" | "tcDone", rawValue: string) => {
+      const digits = rawValue.replace(/\D/g, "");
+      const value = Number(digits || 0);
+      setState((current) => ({
+        ...current,
+        [field]: Number.isSafeInteger(value) ? value : Number.MAX_SAFE_INTEGER,
+      }));
+    },
+    [],
+  );
 
   const commit = (mode: "submit" | "edit") => {
     saveReport(state, submittedBy, mode);
@@ -183,7 +209,7 @@ function DailyPage() {
     const existing = getReportByDate(state.date);
     setConfirmOverwrite(false);
     if (!existing) return;
-    setState({ date: existing.date, agents: existing.agents });
+    setState(existing);
     setSubmittedBy(existing.submittedBy ?? submittedBy);
     applySaved(existing);
     toast.info(`Opened existing report for ${fmtDate(existing.date)}`);
@@ -211,9 +237,12 @@ function DailyPage() {
     setConfirmEdit(false);
     setLocked(false);
     setEditing(true);
+    setState((current) => ({
+      ...current,
+      agents: syncAgentsWithRoster(getRoster(), current.agents),
+    }));
     toast.info("Report unlocked for editing.");
   };
-
 
   const canvasOf = async () => {
     const node = reportRef.current;
@@ -288,7 +317,9 @@ function DailyPage() {
 
   const printDashboard = () => window.print();
 
-  const selectedDate = state.date ? new Date(`${state.date}T00:00:00`) : undefined;
+  const selectedDate = state.date
+    ? new Date(`${state.date}T00:00:00`)
+    : undefined;
 
   return (
     <div className="min-h-screen bg-background">
@@ -411,17 +442,21 @@ function DailyPage() {
                     const date = format(d, "yyyy-MM-dd");
                     const existing = getReportByDate(date);
                     if (existing) {
-  setState({
-    date: existing.date,
-    agents: syncAgentsWithRoster(getRoster(), existing.agents),
-  });
-  setSubmittedBy(existing.submittedBy ?? submittedBy);
-} else {
-                      setState((s) => ({
-                        ...s,
+                      setState({
+                        ...existing,
+                        agents: syncAgentsWithRoster(
+                          getRoster(),
+                          existing.agents,
+                        ),
+                      });
+                      setSubmittedBy(existing.submittedBy ?? submittedBy);
+                    } else {
+                      setState({
                         date,
-                        agents: syncAgentsWithRoster(getRoster(), s.agents),
-                      }));
+                        agents: syncAgentsWithRoster(getRoster(), []),
+                        tcScheduled: 0,
+                        tcDone: 0,
+                      });
                     }
                     applySaved(existing);
                   }}
@@ -469,6 +504,50 @@ function DailyPage() {
           readOnly={locked}
         />
 
+        <section className="rounded-2xl border border-border bg-card p-5 shadow-soft">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">
+              Daily TC Totals
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Enter one total for the entire team. No agent assignment.
+            </p>
+          </div>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:max-w-2xl">
+            <div className="space-y-2">
+              <Label htmlFor="tc-scheduled-total">TC Scheduled</Label>
+              <Input
+                id="tc-scheduled-total"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                min={0}
+                readOnly={locked}
+                value={String(state.tcScheduled ?? 0)}
+                onChange={(event) =>
+                  updateTcTotal("tcScheduled", event.target.value)
+                }
+                className="h-12 rounded-xl text-center text-lg font-semibold tabular-nums"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="tc-done-total">TC Done</Label>
+              <Input
+                id="tc-done-total"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                min={0}
+                readOnly={locked}
+                value={String(state.tcDone ?? 0)}
+                onChange={(event) =>
+                  updateTcTotal("tcDone", event.target.value)
+                }
+                className="h-12 rounded-xl text-center text-lg font-semibold tabular-nums"
+              />
+            </div>
+          </div>
+        </section>
 
         {/* KPIs */}
         <section className="space-y-4">
@@ -495,6 +574,13 @@ function DailyPage() {
               tone="default"
             />
             <KpiCard
+              label="Pending Pre-TC"
+              value={totals.pendingPreTc}
+              sub="Pre-TC not yet converted"
+              icon={ClipboardList}
+              tone="warning"
+            />
+            <KpiCard
               label="Pre-TC → TC"
               value={totals.preTcToTc}
               icon={ArrowRightLeft}
@@ -513,8 +599,22 @@ function DailyPage() {
               icon={Target}
               tone="default"
             />
+            <KpiCard
+              label="TC Scheduled"
+              value={totals.totalTcScheduled}
+              sub="Appointments scheduled"
+              icon={CalendarIcon}
+              tone="primary"
+            />
+            <KpiCard
+              label="TC Done"
+              value={totals.totalTcDone}
+              sub="Completed teleconsultations"
+              icon={CheckCircle2}
+              tone="success"
+            />
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <KpiCard
               label="Pickup Rate"
               value={fmtPct(totals.pickupRate)}
@@ -526,6 +626,13 @@ function DailyPage() {
               label="Pre-TC → TC Rate"
               value={fmtPct(totals.preTcToTcRate)}
               sub="Pre-TC→TC / Pre-TC"
+              icon={Percent}
+              tone="success"
+            />
+            <KpiCard
+              label="TC Completion Rate"
+              value={fmtPct(totals.tcCompletionRate)}
+              sub="TC Done / TC Scheduled"
               icon={Percent}
               tone="success"
             />
@@ -591,7 +698,11 @@ function DailyPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="outline" className="rounded-xl" onClick={openExisting}>
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={openExisting}
+            >
               Open Existing Report
             </Button>
             <AlertDialogAction onClick={() => commit("submit")}>
@@ -606,8 +717,8 @@ function DailyPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Edit submitted report?</AlertDialogTitle>
             <AlertDialogDescription>
-              This report is locked. Unlocking allows changes — after saving, the
-              status becomes “Edited After Submission”.
+              This report is locked. Unlocking allows changes — after saving,
+              the status becomes “Edited After Submission”.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -619,11 +730,10 @@ function DailyPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto rounded-2xl p-0">
           <DialogTitle className="sr-only">
-            CureMe Abroad Operations Hub — {fmtDate(state.date)}
+            CureMeAbroad Operations Hub — {fmtDate(state.date)}
           </DialogTitle>
 
           <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card/95 px-6 py-4 backdrop-blur print:hidden">
