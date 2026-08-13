@@ -397,6 +397,15 @@ function TcShiftMonitorPage() {
   const [search, setSearch] = useState("");
   const [now, setNow] = useState(Date.now());
   const [activeTab, setActiveTab] = useState("import");
+  const closeDayKey = (date: string) => `luxora.tc-day-closed.${date}`;
+  const [dayClosed, setDayClosed] = useState(false);
+
+  useEffect(() => {
+    setDayClosed(
+      typeof window !== "undefined" &&
+        window.localStorage.getItem(closeDayKey(shiftDate)) === "1",
+    );
+  }, [shiftDate]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30000);
@@ -483,6 +492,10 @@ function TcShiftMonitorPage() {
   };
 
   const saveSnapshot = async () => {
+    if (dayClosed) {
+      toast.error("This day is closed. Click Edit Day before changing it.");
+      return;
+    }
     const schedule = parseTcBookings(scheduledRaw, "scheduled");
     const aligned = parseTcBookings(alignedRaw, "aligned");
     setScheduledResult(schedule);
@@ -518,6 +531,10 @@ function TcShiftMonitorPage() {
   };
 
   const deleteSnapshot = async () => {
+    if (dayClosed) {
+      toast.error("This day is closed. Click Edit Day before deleting a snapshot.");
+      return;
+    }
     const label = phase === "opening" ? "Opening" : "Closing";
     if (
       !window.confirm(
@@ -686,6 +703,45 @@ function TcShiftMonitorPage() {
     }
   };
 
+  const editClosedDay = () => {
+    window.localStorage.removeItem(closeDayKey(shiftDate));
+    setDayClosed(false);
+    toast.info(`${dateLabel(shiftDate)} unlocked for editing. Save a new closing snapshot, then close the day again.`);
+  };
+
+  const closeDay = () => {
+    if (!closing) {
+      toast.error("Save the Closing Snapshot before closing the day.");
+      setPhase("closing");
+      setActiveTab("import");
+      return;
+    }
+
+    const unresolved = metrics.scheduled;
+    if (unresolved > 0) {
+      const ok = window.confirm(
+        `${unresolved} TC${unresolved === 1 ? " is" : "s are"} still pending/overdue. Close ${dateLabel(shiftDate)} anyway?`,
+      );
+      if (!ok) return;
+    }
+
+    window.localStorage.setItem(closeDayKey(shiftDate), "1");
+    setDayClosed(true);
+
+    const next = new Date(`${shiftDate}T00:00:00`);
+    next.setDate(next.getDate() + 1);
+    const nextDate = [
+      next.getFullYear(),
+      String(next.getMonth() + 1).padStart(2, "0"),
+      String(next.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    toast.success(`${dateLabel(shiftDate)} closed. Opening ${dateLabel(nextDate)}.`);
+    setShiftDate(nextDate);
+    setPhase("opening");
+    setActiveTab("import");
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Toaster />
@@ -733,6 +789,25 @@ function TcShiftMonitorPage() {
               {cloudAvailable ? <Cloud className="size-4" /> : <CloudOff className="size-4" />}
               {cloudAvailable ? "Cloud snapshots" : "Browser storage"}
             </Badge>
+            {dayClosed ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                onClick={editClosedDay}
+              >
+                <ShieldCheck className="size-4" /> Edit Day
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                className="h-10 rounded-xl"
+                onClick={closeDay}
+                disabled={saving || loading}
+              >
+                <CheckCircle2 className="size-4" /> Close Day
+              </Button>
+            )}
           </div>
         </section>
 
@@ -810,6 +885,7 @@ function TcShiftMonitorPage() {
                     ) : null}
                   </div>
                   <Textarea
+                    disabled={dayClosed}
                     value={scheduledRaw}
                     onChange={(event) => setScheduledRaw(event.target.value)}
                     placeholder="Paste the complete Scheduled CRM text here…"
@@ -835,6 +911,7 @@ function TcShiftMonitorPage() {
                     ) : null}
                   </div>
                   <Textarea
+                    disabled={dayClosed}
                     value={alignedRaw}
                     onChange={(event) => setAlignedRaw(event.target.value)}
                     placeholder="Paste the complete Aligned CRM text here…"
