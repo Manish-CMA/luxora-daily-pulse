@@ -1,10 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import {
-  DEFAULT_AGENT_NAMES,
-  newAgent,
-  type Agent,
-  type DashboardState,
-} from "@/lib/dashboard";
+import { DEFAULT_AGENT_NAMES, newAgent, type Agent, type DashboardState } from "@/lib/dashboard";
 
 export type RosterAgent = { id: string; name: string; active: boolean };
 export type ReportStatus = "draft" | "submitted" | "edited";
@@ -109,7 +104,7 @@ function toSavedReports(rows: ReportRow[], entries: EntryRow[]): SavedReport[] {
     const list = byReport.get(e.report_id) ?? [];
     list.push(
       normalizeAgent({
-        id: e.agent_id ?? undefined,
+        ...(e.agent_id ? { id: e.agent_id } : {}),
         name: e.agent_name,
         callsMade: e.calls_made,
         callsPicked: e.calls_picked,
@@ -134,39 +129,32 @@ function toSavedReports(rows: ReportRow[], entries: EntryRow[]): SavedReport[] {
 }
 
 async function loadFromCloud() {
-  const [{ data: agentRows }, { data: reportRows }, { data: entryRows }] =
-    await Promise.all([
-      supabase.from("agents").select("id, name, active").order("created_at"),
-      supabase
-        .from("daily_reports")
-        .select(
-          "id, report_date, status, submitted_by_name, submitted_at, last_edited_by_name, last_edited_at, tc_scheduled, tc_done",
-        )
-        .order("report_date", { ascending: false }),
-      supabase
-        .from("daily_report_entries")
-        .select(
-          "report_id, agent_id, agent_name, calls_made, calls_picked, pre_tc, pre_tc_to_tc, direct_tc",
-        ),
-    ]);
+  const [{ data: agentRows }, { data: reportRows }, { data: entryRows }] = await Promise.all([
+    supabase.from("agents").select("id, name, active").order("created_at"),
+    supabase
+      .from("daily_reports")
+      .select(
+        "id, report_date, status, submitted_by_name, submitted_at, last_edited_by_name, last_edited_at, tc_scheduled, tc_done",
+      )
+      .order("report_date", { ascending: false }),
+    supabase
+      .from("daily_report_entries")
+      .select(
+        "report_id, agent_id, agent_name, calls_made, calls_picked, pre_tc, pre_tc_to_tc, direct_tc",
+      ),
+  ]);
 
   rosterCache = (agentRows ?? []).map((a) => ({
     id: a.id,
     name: a.name,
     active: a.active !== false,
   }));
-  reportsCache = toSavedReports(
-    (reportRows ?? []) as ReportRow[],
-    (entryRows ?? []) as EntryRow[],
-  );
+  reportsCache = toSavedReports((reportRows ?? []) as ReportRow[], (entryRows ?? []) as EntryRow[]);
 }
 
 async function seedDefaultAgents() {
   const rows = DEFAULT_AGENT_NAMES.map((name) => ({ name, active: true }));
-  const { data } = await supabase
-    .from("agents")
-    .insert(rows)
-    .select("id, name, active");
+  const { data } = await supabase.from("agents").insert(rows).select("id, name, active");
   rosterCache = (data ?? []).map((a) => ({
     id: a.id,
     name: a.name,
@@ -193,9 +181,7 @@ async function migrateLocalData() {
     }
 
     const rawReports = localStorage.getItem(LEGACY_REPORTS_KEY);
-    const localReports: SavedReport[] = rawReports
-      ? JSON.parse(rawReports)
-      : [];
+    const localReports: SavedReport[] = rawReports ? JSON.parse(rawReports) : [];
     const existingDates = new Set(reportsCache.map((r) => r.date));
     for (const rep of localReports) {
       if (existingDates.has(rep.date)) continue;
@@ -278,17 +264,12 @@ export function saveRoster(list: RosterAgent[]) {
 }
 
 /** Build the daily entry rows from the roster, keeping any existing values. */
-export function syncAgentsWithRoster(
-  roster: RosterAgent[],
-  existing: Agent[],
-): Agent[] {
+export function syncAgentsWithRoster(roster: RosterAgent[], existing: Agent[]): Agent[] {
   return roster
     .filter((r) => r.active)
     .map((r) => {
       const prev = existing.find((a) => a.id === r.id);
-      return prev
-        ? normalizeAgent({ ...prev, id: r.id, name: r.name })
-        : newAgent(r.name, r.id);
+      return prev ? normalizeAgent({ ...prev, id: r.id, name: r.name }) : newAgent(r.name, r.id);
     });
 }
 
@@ -339,10 +320,7 @@ async function persistReport(report: SavedReport) {
     .single();
   if (error || !saved) throw error ?? new Error("Report not saved");
 
-  await supabase
-    .from("daily_report_entries")
-    .delete()
-    .eq("report_id", saved.id);
+  await supabase.from("daily_report_entries").delete().eq("report_id", saved.id);
   const normalizedAgents = normalizeAgents(report.agents);
   if (normalizedAgents.length > 0)
     await supabase.from("daily_report_entries").insert(
@@ -366,8 +344,7 @@ export function saveReport(
 ) {
   const existing = reportsCache.find((r) => r.date === report.date);
   const by = (submittedBy ?? "").trim();
-  if (by && isBrowser())
-    localStorage.setItem(SUBMITTER_KEY, JSON.stringify(by));
+  if (by && isBrowser()) localStorage.setItem(SUBMITTER_KEY, JSON.stringify(by));
   const now = new Date().toISOString();
   const isEdit = mode === "edit" && Boolean(existing);
 
@@ -387,9 +364,7 @@ export function saveReport(
         ? { submittedBy: by }
         : {}),
     status: isEdit ? "edited" : "submitted",
-    ...(isEdit
-      ? { lastEditedAt: now, ...(by ? { lastEditedBy: by } : {}) }
-      : {}),
+    ...(isEdit ? { lastEditedAt: now, ...(by ? { lastEditedBy: by } : {}) } : {}),
   };
 
   reportsCache = [...reportsCache.filter((r) => r.date !== report.date), next];
@@ -429,8 +404,7 @@ export function clearAllData() {
   emit();
   void (async () => {
     try {
-      if (dates.length > 0)
-        await supabase.from("daily_reports").delete().in("report_date", dates);
+      if (dates.length > 0) await supabase.from("daily_reports").delete().in("report_date", dates);
       await refreshStore();
     } catch (e) {
       console.error("Failed to clear reports", e);
@@ -477,13 +451,7 @@ export function validateReport(state: DashboardState): string[] {
   }
 
   for (const a of named) {
-    const values = [
-      a.callsMade,
-      a.callsPicked,
-      a.preTc,
-      a.preTcToTc,
-      a.directTc,
-    ];
+    const values = [a.callsMade, a.callsPicked, a.preTc, a.preTcToTc, a.directTc];
 
     if (
       values.some(

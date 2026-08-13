@@ -7,23 +7,18 @@ import { Switch } from "@/components/ui/switch";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/dashboard/AppHeader";
-import {
-  getRoster,
-  saveRoster,
-  onStoreChange,
-  type RosterAgent,
-} from "@/lib/storage";
+import { getRoster, saveRoster, onStoreChange, type RosterAgent } from "@/lib/storage";
 
 export const Route = createFileRoute("/_authenticated/agents")({
   head: () => ({
     meta: [
-      { title: "Agent Management | CureMe Abroad TC Dashboard" },
+      { title: "Agent Management | CureMeAbroad TC Dashboard" },
       {
         name: "description",
         content:
           "Add, rename or remove teleconsultation coordinators. Changes update the daily entry table automatically.",
       },
-      { property: "og:title", content: "Agent Management — CureMe Abroad TC Dashboard" },
+      { property: "og:title", content: "Agent Management — CureMeAbroad TC Dashboard" },
       {
         property: "og:description",
         content: "Manage the coordinator roster used for daily TC reporting.",
@@ -76,9 +71,7 @@ function AgentsPage() {
       toast.error("Name cannot be empty.");
       return;
     }
-    if (
-      roster.some((r) => r.id !== id && r.name.toLowerCase() === n.toLowerCase())
-    ) {
+    if (roster.some((r) => r.id !== id && r.name.toLowerCase() === n.toLowerCase())) {
       toast.error("That agent already exists.");
       return;
     }
@@ -102,9 +95,7 @@ function AgentsPage() {
       <Toaster />
       <AppHeader />
       <main className="mx-auto max-w-3xl px-6 py-10">
-        <h2 className="text-2xl font-semibold tracking-tight">
-          Agent Management
-        </h2>
+        <h2 className="text-2xl font-semibold tracking-tight">Agent Management</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Changes here update the daily entry table automatically.
         </p>

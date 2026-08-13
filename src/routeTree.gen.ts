@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as DoctorScheduleRouteImport } from './routes/doctor-schedule'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated/agents'
 import { Route as AuthenticatedDailyRouteImport } from './routes/_authenticated/daily'
@@ -26,6 +27,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DoctorScheduleRoute = DoctorScheduleRouteImport.update({
+  id: '/doctor-schedule',
+  path: '/doctor-schedule',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
@@ -68,6 +74,7 @@ const AuthenticatedTcSchedulerRoute =
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/auth': typeof AuthRoute
+  '/doctor-schedule': typeof DoctorScheduleRoute
   '/agents': typeof AuthenticatedAgentsRoute
   '/daily': typeof AuthenticatedDailyRoute
   '/history': typeof AuthenticatedHistoryRoute
@@ -77,6 +84,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
+  '/doctor-schedule': typeof DoctorScheduleRoute
   '/agents': typeof AuthenticatedAgentsRoute
   '/daily': typeof AuthenticatedDailyRoute
   '/history': typeof AuthenticatedHistoryRoute
@@ -89,6 +97,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/doctor-schedule': typeof DoctorScheduleRoute
   '/_authenticated/agents': typeof AuthenticatedAgentsRoute
   '/_authenticated/daily': typeof AuthenticatedDailyRoute
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
@@ -102,6 +111,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/doctor-schedule'
     | '/agents'
     | '/daily'
     | '/history'
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/auth'
+    | '/doctor-schedule'
     | '/agents'
     | '/daily'
     | '/history'
@@ -122,6 +133,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authenticated'
     | '/auth'
+    | '/doctor-schedule'
     | '/_authenticated/agents'
     | '/_authenticated/daily'
     | '/_authenticated/history'
@@ -134,6 +146,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  DoctorScheduleRoute: typeof DoctorScheduleRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -150,6 +163,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/doctor-schedule': {
+      id: '/doctor-schedule'
+      path: '/doctor-schedule'
+      fullPath: '/doctor-schedule'
+      preLoaderRoute: typeof DoctorScheduleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -230,6 +250,7 @@ const AuthenticatedRouteRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  DoctorScheduleRoute: DoctorScheduleRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

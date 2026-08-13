@@ -8,35 +8,29 @@ import {
   Trophy,
   FilePlus2,
   BarChart3,
+  CalendarClock,
   Users,
   Settings as SettingsIcon,
   ArrowRight,
   type LucideIcon,
 } from "lucide-react";
 import { AppHeader } from "@/components/dashboard/AppHeader";
-import {
-  agentTcsLinedUp,
-  computeTotals,
-  fmtDate,
-  todayIso,
-  topPerformer,
-} from "@/lib/dashboard";
+import { agentTcsLinedUp, computeTotals, fmtDate, todayIso, topPerformer } from "@/lib/dashboard";
 import { getReportByDate, onStoreChange, type SavedReport } from "@/lib/storage";
 
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
     meta: [
-      { title: "CureMe Abroad Operations Hub | Operations Home" },
+      { title: "CureMeAbroad Operations Hub | Operations Home" },
       {
         name: "description",
         content:
-          "Central hub for CureMe Abroad teleconsultation operations: submit daily reports, review period analytics, manage agents and settings.",
+          "Central hub for CureMeAbroad teleconsultation operations: monitor TC shifts, submit daily reports, review analytics and manage agents.",
       },
-      { property: "og:title", content: "CureMe Abroad Operations Hub" },
+      { property: "og:title", content: "CureMeAbroad Operations Hub" },
       {
         property: "og:description",
-        content:
-          "Submit daily TC reports, review analytics and manage your coordinator team.",
+        content: "Submit daily TC reports, review analytics and manage your coordinator team.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -58,6 +52,13 @@ const CARDS: {
     desc: "Enter today's agent performance and submit the daily report.",
     icon: FilePlus2,
     tone: "bg-primary-soft text-primary",
+  },
+  {
+    to: "/tc-scheduler",
+    title: "TC Shift Monitor",
+    desc: "Paste scheduled and aligned CRM lists, follow the live shift and compare closing outcomes.",
+    icon: CalendarClock,
+    tone: "bg-indigo-50 text-indigo-600",
   },
   {
     to: "/reports",
@@ -96,9 +97,7 @@ function StatusItem({
       <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         <Icon className="size-3.5" /> {label}
       </p>
-      <p className="mt-1 truncate text-lg font-semibold tracking-tight">
-        {value}
-      </p>
+      <p className="mt-1 truncate text-lg font-semibold tracking-tight">{value}</p>
     </div>
   );
 }
@@ -126,32 +125,20 @@ function TodayStatus() {
           <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Today's Report Status
           </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {today ? fmtDate(today) : "—"}
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{today ? fmtDate(today) : "—"}</p>
         </div>
         <span
           className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${
-            submitted
-              ? "bg-success-soft text-success"
-              : "bg-warning-soft text-warning"
+            submitted ? "bg-success-soft text-success" : "bg-warning-soft text-warning"
           }`}
         >
-          {submitted ? (
-            <CheckCircle2 className="size-4" />
-          ) : (
-            <Clock className="size-4" />
-          )}
+          {submitted ? <CheckCircle2 className="size-4" /> : <Clock className="size-4" />}
           {submitted ? "Submitted" : "Pending"}
         </span>
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatusItem
-          icon={User}
-          label="Submitted By"
-          value={report?.submittedBy ?? "—"}
-        />
+        <StatusItem icon={User} label="Submitted By" value={report?.submittedBy ?? "—"} />
         <StatusItem
           icon={Clock}
           label="Submitted Time"
@@ -184,12 +171,8 @@ function HomePage() {
     <div className="min-h-screen bg-background">
       <AppHeader />
       <main className="mx-auto max-w-7xl px-6 py-12">
-        <h2 className="text-2xl font-semibold tracking-tight">
-          Operations Home
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Choose where you'd like to start.
-        </p>
+        <h2 className="text-2xl font-semibold tracking-tight">Operations Home</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Choose where you'd like to start.</p>
 
         <div className="mt-8">
           <TodayStatus />
@@ -202,9 +185,7 @@ function HomePage() {
               to={c.to}
               className="group rounded-2xl border border-border bg-card p-6 shadow-soft transition-shadow hover:shadow-lift"
             >
-              <span
-                className={`flex size-12 items-center justify-center rounded-2xl ${c.tone}`}
-              >
+              <span className={`flex size-12 items-center justify-center rounded-2xl ${c.tone}`}>
                 <c.icon className="size-6" />
               </span>
               <h3 className="mt-4 flex items-center gap-2 text-lg font-semibold tracking-tight">

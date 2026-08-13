@@ -12,13 +12,13 @@ export const Route = createFileRoute("/auth")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Sign In | CureMe Abroad Operations Hub" },
+      { title: "Sign In | CureMeAbroad Operations Hub" },
       {
         name: "description",
         content:
-          "Sign in to the CureMe Abroad Operations Hub to submit and review daily teleconsultation coordinator reports.",
+          "Sign in to the CureMeAbroad Operations Hub to submit and review daily teleconsultation coordinator reports.",
       },
-      { property: "og:title", content: "Sign In — CureMe Abroad Operations Hub" },
+      { property: "og:title", content: "Sign In — CureMeAbroad Operations Hub" },
       {
         property: "og:description",
         content: "Secure access to daily TC reporting, analytics and team management.",
@@ -69,9 +69,7 @@ function AuthPage() {
         });
         if (error) throw error;
         if (!data.session) {
-          setNotice(
-            "Account created. Check your email and confirm your address to sign in.",
-          );
+          setNotice("Account created. Check your email and confirm your address to sign in.");
           toast.success("Confirmation email sent");
         }
       } else {
@@ -98,9 +96,7 @@ function AuthPage() {
             <LayoutDashboard className="size-5" />
           </span>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">
-              CureMe Abroad Operations Hub
-            </h1>
+            <h1 className="text-lg font-semibold tracking-tight">CureMeAbroad Operations Hub</h1>
             <p className="text-xs text-muted-foreground">
               Daily teleconsultation coordinator reporting
             </p>
@@ -155,9 +151,7 @@ function AuthPage() {
           </div>
 
           {notice ? (
-            <p className="rounded-xl bg-success-soft px-4 py-3 text-sm text-success">
-              {notice}
-            </p>
+            <p className="rounded-xl bg-success-soft px-4 py-3 text-sm text-success">{notice}</p>
           ) : null}
 
           <Button type="submit" disabled={busy} className="w-full rounded-xl shadow-soft">

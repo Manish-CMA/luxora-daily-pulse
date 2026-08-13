@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/history")({
   head: () => ({
     meta: [
-      { title: "Report History | CureMe Abroad Operations Hub" },
+      { title: "Report History | CureMeAbroad Operations Hub" },
       {
         name: "description",
         content:
@@ -27,7 +27,7 @@ export const Route = createFileRoute("/_authenticated/history")({
       },
       {
         property: "og:title",
-        content: "Report History — CureMe Abroad Operations Hub",
+        content: "Report History — CureMeAbroad Operations Hub",
       },
       {
         property: "og:description",
@@ -96,8 +96,8 @@ function HistoryPage() {
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-red-600">
-  REPORT HISTORY TEST 123
-</h2>
+            REPORT HISTORY TEST 123
+          </h2>
           <p className="text-sm text-muted-foreground">
             Every saved daily report with its status and audit trail.
           </p>
@@ -160,16 +160,16 @@ function HistoryPage() {
               <thead>
                 <tr className="bg-secondary/60 text-left">
                   {[
-  "Date",
-  "Status",
-  "Submitted By",
-  "Submitted Time",
-  "Last Edited By",
-  "Last Edited Time",
-  "Total Calls",
-  "TCs Lined Up",
-  "Actions",
-].map((h) => (
+                    "Date",
+                    "Status",
+                    "Submitted By",
+                    "Submitted Time",
+                    "Last Edited By",
+                    "Last Edited Time",
+                    "Total Calls",
+                    "TCs Lined Up",
+                    "Actions",
+                  ].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
@@ -185,50 +185,42 @@ function HistoryPage() {
                     key={report.date}
                     className="border-t border-border transition-colors hover:bg-secondary/40"
                   >
-                    <td className="px-4 py-3 font-medium">
-                      {fmtDate(report.date)}
-                    </td>
+                    <td className="px-4 py-3 font-medium">{fmtDate(report.date)}</td>
                     <td className="px-4 py-3">
                       <StatusBadge report={report} />
                     </td>
                     <td className="px-4 py-3">{report.submittedBy || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {report.submittedAt
-                        ? format(new Date(report.submittedAt), "PPp")
-                        : "—"}
+                      {report.submittedAt ? format(new Date(report.submittedAt), "PPp") : "—"}
                     </td>
                     <td className="px-4 py-3">{report.lastEditedBy || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {report.lastEditedAt
-                        ? format(new Date(report.lastEditedAt), "PPp")
-                        : "—"}
+                      {report.lastEditedAt ? format(new Date(report.lastEditedAt), "PPp") : "—"}
                     </td>
-                    <td className="px-4 py-3 font-semibold tabular-nums">
-  {totals.callsMade}
-</td>
+                    <td className="px-4 py-3 font-semibold tabular-nums">{totals.callsMade}</td>
 
-<td className="px-4 py-3 font-semibold tabular-nums text-primary">
-  {totals.totalTcsLinedUp}
-</td>
+                    <td className="px-4 py-3 font-semibold tabular-nums text-primary">
+                      {totals.totalTcsLinedUp}
+                    </td>
 
-<td className="px-4 py-3">
-  <button
-    onClick={() => {
-      if (
-        window.confirm(
-          `Delete the report for ${fmtDate(report.date)}? This cannot be undone.`,
-        )
-      ) {
-        deleteReport(report.date);
-      }
-    }}
-    className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-white hover:bg-red-700"
-  >
-    <Trash2 className="size-4" />
-    Delete
-  </button>
-</td>
-</tr>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Delete the report for ${fmtDate(report.date)}? This cannot be undone.`,
+                            )
+                          ) {
+                            deleteReport(report.date);
+                          }
+                        }}
+                        className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-white hover:bg-red-700"
+                      >
+                        <Trash2 className="size-4" />
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
                 ))}
                 {rows.length === 0 ? (
                   <tr>

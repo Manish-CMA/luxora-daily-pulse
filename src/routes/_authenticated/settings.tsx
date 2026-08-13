@@ -28,13 +28,13 @@ import {
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
     meta: [
-      { title: "Settings | CureMe Abroad TC Dashboard" },
+      { title: "Settings | CureMeAbroad TC Dashboard" },
       {
         name: "description",
         content:
-          "Review submitted daily report history and manage shared CureMe Abroad dashboard data.",
+          "Review submitted daily report history and manage shared CureMeAbroad dashboard data.",
       },
-      { property: "og:title", content: "Settings — CureMe Abroad TC Dashboard" },
+      { property: "og:title", content: "Settings — CureMeAbroad TC Dashboard" },
       {
         property: "og:description",
         content: "Manage shared reports and dashboard data.",
@@ -71,9 +71,7 @@ function SettingsPage() {
             <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               <Database className="size-4 text-primary" /> Submitted Reports
             </h3>
-            <span className="text-xs text-muted-foreground">
-              {reports.length} stored
-            </span>
+            <span className="text-xs text-muted-foreground">{reports.length} stored</span>
           </div>
           <ul className="divide-y divide-border">
             {reports.map((r) => (
@@ -123,8 +121,8 @@ function SettingsPage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Clear all report data?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This permanently removes every submitted report and the
-                  current draft from this browser.
+                  This permanently removes every submitted report and the current draft from this
+                  browser.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

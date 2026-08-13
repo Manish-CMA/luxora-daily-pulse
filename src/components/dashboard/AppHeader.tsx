@@ -10,6 +10,7 @@ import { resetStore } from "@/lib/storage";
 const NAV = [
   { to: "/", label: "Home", exact: true },
   { to: "/daily", label: "Daily Report", exact: false },
+  { to: "/tc-scheduler", label: "TC Shift Monitor", exact: false },
   { to: "/reports", label: "Reports", exact: false },
   { to: "/history", label: "Report History", exact: false },
   { to: "/agents", label: "Team Management", exact: false },
@@ -37,9 +38,7 @@ export function AppHeader({ actions }: { actions?: ReactNode }) {
             <LayoutDashboard className="size-5" />
           </span>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">
-              CureMe Abroad Operations Hub
-            </h1>
+            <h1 className="text-lg font-semibold tracking-tight">CureMeAbroad Operations Hub</h1>
             <p className="text-xs text-muted-foreground">
               Daily teleconsultation coordinator performance reporting
             </p>

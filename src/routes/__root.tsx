@@ -14,7 +14,6 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { supabase } from "@/integrations/supabase/client";
 import { resetStore } from "@/lib/storage";
 
-
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -80,17 +79,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "CureMe Abroad Operations Hub" },
+      { title: "CureMeAbroad Operations Hub" },
       {
         name: "description",
         content:
-          "Daily teleconsultation coordinator reporting, analytics and dashboard exports for CureMe Abroad operations.",
+          "Daily teleconsultation coordinator reporting, analytics and dashboard exports for CureMeAbroad operations.",
       },
-      { name: "author", content: "CureMe Abroad" },
-      { property: "og:title", content: "CureMe Abroad Operations Hub" },
+      { name: "author", content: "CureMeAbroad" },
+      { property: "og:title", content: "CureMeAbroad Operations Hub" },
       {
         property: "og:description",
-        content: "Daily TC performance reporting for CureMe Abroad operations teams.",
+        content: "Daily TC performance reporting for CureMeAbroad operations teams.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -113,7 +112,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
     ],
-
   }),
   shellComponent: RootShell,
   component: RootComponent,
@@ -141,8 +139,7 @@ function RootComponent() {
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED")
-        return;
+      if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       if (event === "SIGNED_OUT") resetStore();
       router.invalidate();
       if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
@@ -157,4 +154,3 @@ function RootComponent() {
     </QueryClientProvider>
   );
 }
-

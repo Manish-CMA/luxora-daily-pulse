@@ -1,20 +1,30 @@
-// Cloudflare enables `nodejs_compat` by default from 2026-08-04 and now REJECTS
-// workers that still list the flag ("...became the default ... does not need to be
-// specified anymore"), which made every published request fail with a 502.
-// Nitro's cloudflare preset always appends the flag when node compat is on, so we
-// strip it from the generated worker config after the build.
+// Nitro generates Cloudflare's config after the application build. Keep that
+// generated config deployable across Nitro output layouts and timezone edges.
 import { readFile, writeFile } from "node:fs/promises";
 
-const path = "dist/server/wrangler.json";
+const paths = [".output/server/wrangler.json", "dist/server/wrangler.json"];
+const utcToday = new Date().toISOString().slice(0, 10);
+let patched = false;
 
-try {
-  const config = JSON.parse(await readFile(path, "utf8"));
-  const flags = config.compatibility_flags ?? [];
-  if (!flags.includes("nodejs_compat")) process.exit(0);
-  config.compatibility_flags = flags.filter((f) => f !== "nodejs_compat");
-  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`);
-  console.log("[fix-wrangler-compat] removed redundant nodejs_compat flag");
-} catch (error) {
-  if (error.code === "ENOENT") process.exit(0);
-  throw error;
+for (const path of paths) {
+  try {
+    const config = JSON.parse(await readFile(path, "utf8"));
+    const flags = config.compatibility_flags ?? [];
+    const nextFlags = flags.filter((flag) => flag !== "nodejs_compat");
+
+    if (config.compatibility_date > utcToday) {
+      config.compatibility_date = utcToday;
+    }
+    config.compatibility_flags = nextFlags;
+
+    await writeFile(path, `${JSON.stringify(config, null, 2)}\n`);
+    console.log(`[fix-wrangler-compat] patched ${path}`);
+    patched = true;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+if (!patched) {
+  console.warn("[fix-wrangler-compat] no generated wrangler.json found");
 }
