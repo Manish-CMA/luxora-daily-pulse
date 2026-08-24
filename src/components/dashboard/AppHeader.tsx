@@ -9,6 +9,7 @@ import { resetStore } from "@/lib/storage";
 
 const NAV = [
   { to: "/", label: "Home", exact: true },
+  { to: "/night-shift", label: "Night Shift", exact: false },
   { to: "/daily", label: "Daily Report", exact: false },
   { to: "/tc-scheduler", label: "TC Shift Monitor", exact: false },
   { to: "/reports", label: "Reports", exact: false },
