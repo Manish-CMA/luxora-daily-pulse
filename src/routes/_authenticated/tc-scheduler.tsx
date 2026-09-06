@@ -13,6 +13,7 @@ import {
   Eye,
   FileDiff,
   Loader2,
+  Plus,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -93,11 +94,12 @@ const statusTone: Record<TcBookingStatus, string> = {
   "No-show": "border-red-200 bg-red-50 text-red-700",
   "No Photos": "border-amber-200 bg-amber-50 text-amber-700",
   Rescheduled: "border-violet-200 bg-violet-50 text-violet-700",
+  Cancelled: "border-slate-200 bg-slate-100 text-slate-700",
   Scheduled: "border-blue-200 bg-blue-50 text-blue-700",
   Unknown: "border-border bg-secondary text-muted-foreground",
 };
 
-type MetricFilter = "all" | "aligned" | "done" | "no-show" | "rescheduled" | "pending" | "overdue";
+type MetricFilter = "all" | "aligned" | "done" | "no-show" | "rescheduled" | "cancelled" | "pending" | "overdue";
 
 const metricFilterLabel: Record<MetricFilter, string> = {
   all: "All active TCs",
@@ -105,6 +107,7 @@ const metricFilterLabel: Record<MetricFilter, string> = {
   done: "Done TCs",
   "no-show": "No-show TCs",
   rescheduled: "Reschedule events",
+  cancelled: "Cancelled TCs",
   pending: "Pending TCs",
   overdue: "Overdue — status not marked",
 };
@@ -127,14 +130,90 @@ const formatCountdown = (milliseconds: number) => {
 
 type PhotoStatus = "yes" | "no";
 type PhotoStatusMap = Record<string, PhotoStatus>;
+type ConfirmationStatus = "confirmed" | "not-coming" | "no-response";
+type ConfirmationStatusMap = Record<string, ConfirmationStatus>;
+type ReportTimezone = "Asia/Kolkata" | "Asia/Karachi";
+type AssignmentOverrides = Record<
+  string,
+  Pick<TcBooking, "createdBy" | "closureAgent">
+>;
+
+const TEAM_AGENTS = ["Manav", "Meenu", "Shubhi", "Abhishek", "Pranshu", "Deepanshu"];
+
+type ManualTcForm = {
+  patientName: string;
+  caseId: string;
+  istDate: string;
+  istTime: string;
+  doctor: string;
+  createdBy: string;
+  closureAgent: string;
+  meetingUrl: string;
+  status: TcBookingStatus;
+  countAsAligned: boolean;
+};
+
+const manualFormForDate = (istDate: string): ManualTcForm => ({
+  patientName: "",
+  caseId: "",
+  istDate,
+  istTime: "",
+  doctor: "",
+  createdBy: "",
+  closureAgent: "",
+  meetingUrl: "",
+  status: "Scheduled",
+  countAsAligned: true,
+});
+
+const mergeBookings = (...groups: TcBooking[][]) =>
+  [...new Map(groups.flat().map((booking) => [booking.fingerprint, booking])).values()];
+
+const assignmentOverridesFromSaved = (parsedBookings: TcBooking[], savedBookings: TcBooking[]) => {
+  const savedByFingerprint = new Map(savedBookings.map((booking) => [booking.fingerprint, booking]));
+  return Object.fromEntries(
+    parsedBookings.flatMap((booking) => {
+      const saved = savedByFingerprint.get(booking.fingerprint);
+      if (!saved) return [];
+      return saved.createdBy !== booking.createdBy || saved.closureAgent !== booking.closureAgent
+        ? [[booking.fingerprint, { createdBy: saved.createdBy, closureAgent: saved.closureAgent }]]
+        : [];
+    }),
+  ) as AssignmentOverrides;
+};
+
+const displayBookingTime = (booking: TcBooking, timezone: ReportTimezone) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(`${booking.istDate}T${booking.istTime}:00+05:30`));
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return { time: `${read("hour")}:${read("minute")}`, date: `${read("day")} ${read("month")}` };
+};
 
 const photoStorageKey = (shiftDate: string) => `luxora.tc-photo-status.${shiftDate}`;
+const confirmationStorageKey = (shiftDate: string) =>
+  `luxora.tc-confirmation-status.${shiftDate}`;
 
 const readPhotoStatuses = (shiftDate: string): PhotoStatusMap => {
   if (typeof window === "undefined") return {};
   try {
     const value = window.localStorage.getItem(photoStorageKey(shiftDate));
     return value ? (JSON.parse(value) as PhotoStatusMap) : {};
+  } catch {
+    return {};
+  }
+};
+
+const readConfirmationStatuses = (shiftDate: string): ConfirmationStatusMap => {
+  if (typeof window === "undefined") return {};
+  try {
+    const value = window.localStorage.getItem(confirmationStorageKey(shiftDate));
+    return value ? (JSON.parse(value) as ConfirmationStatusMap) : {};
   } catch {
     return {};
   }
@@ -235,6 +314,52 @@ function Kpi({
   );
 }
 
+function AgentNameInput({
+  value,
+  options,
+  onSave,
+  disabled = false,
+  label,
+  listId,
+}: {
+  value: string;
+  options: string[];
+  onSave?: (value: string) => void;
+  disabled?: boolean;
+  label: string;
+  listId: string;
+}) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => setDraft(value), [value]);
+
+  const save = () => {
+    const next = draft.trim();
+    if (next !== value) onSave?.(next);
+  };
+
+  return (
+    <>
+      <Input
+        value={draft}
+        list={listId}
+        disabled={disabled}
+        aria-label={label}
+        placeholder="Type or select agent"
+        className="h-8 min-w-32 bg-card text-xs"
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+      />
+      <datalist id={listId}>
+        {options.map((agent) => <option key={agent} value={agent} />)}
+      </datalist>
+    </>
+  );
+}
+
 function BookingTable({
   bookings,
   privacyMode,
@@ -243,6 +368,13 @@ function BookingTable({
   showPhotos = false,
   photoStatuses = {},
   onPhotoChange,
+  confirmationStatuses = {},
+  onConfirmationChange,
+  onStatusChange,
+  agentOptions,
+  onCreatedByChange,
+  onClosureAgentChange,
+  showPktTime = true,
 }: {
   bookings: TcBooking[];
   privacyMode: boolean;
@@ -251,6 +383,13 @@ function BookingTable({
   showPhotos?: boolean;
   photoStatuses?: PhotoStatusMap;
   onPhotoChange?: (caseId: string, status: PhotoStatus) => void;
+  confirmationStatuses?: ConfirmationStatusMap;
+  onConfirmationChange?: (caseId: string, status?: ConfirmationStatus) => void;
+  onStatusChange?: (booking: TcBooking, status: TcBookingStatus) => void;
+  agentOptions?: string[];
+  onCreatedByChange?: (booking: TcBooking, createdBy: string) => void;
+  onClosureAgentChange?: (booking: TcBooking, closureAgent: string) => void;
+  showPktTime?: boolean;
 }) {
   const rows = preserveRows ? bookings : effectiveBookings(bookings);
   const clashTonesByFingerprint = clashToneByFingerprint(rows);
@@ -264,19 +403,20 @@ function BookingTable({
 
   return (
     <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-soft">
-      <table className="w-full min-w-[1150px] border-collapse text-sm">
+      <table className="w-full min-w-[1240px] border-collapse text-sm">
         <thead>
           <tr className="bg-secondary/60 text-left">
             {[
               "IST",
+              ...(showPktTime ? ["PKT"] : []),
               "Patient",
               "Case ID",
               "Doctor",
-              "Discovery",
-              "Closure",
               "Created by",
+              "Closure",
               "Status",
               ...(showPhotos ? ["Photos received"] : []),
+              ...(showPhotos ? ["TC confirmation"] : []),
             ].map((label) => (
               <th
                 key={label}
@@ -289,6 +429,12 @@ function BookingTable({
         </thead>
         <tbody>
           {rows.map((booking) => {
+            const istTime = displayBookingTime(booking, "Asia/Kolkata");
+            const pktTime = displayBookingTime(booking, "Asia/Karachi");
+            const istDate = new Date(`${booking.istDate}T00:00:00`).toLocaleDateString("en-GB", {
+              day: "2-digit",
+              month: "short",
+            });
             const overdue = booking.status === "Scheduled" && bookingEndTimestamp(booking) <= now;
             const clashTone = clashTonesByFingerprint.get(booking.fingerprint);
             return (
@@ -303,7 +449,7 @@ function BookingTable({
                 }
               >
                 <td className="whitespace-nowrap px-3 py-3 font-semibold tabular-nums text-primary">
-                  {booking.istTime}
+                  {istTime.time}
                   <span className="ml-1 text-[10px] font-normal text-muted-foreground">IST</span>
                   {clashTone ? (
                     <Badge variant="outline" className={`ml-2 text-[10px] ${clashTone.badge}`}>
@@ -311,23 +457,78 @@ function BookingTable({
                     </Badge>
                   ) : null}
                 </td>
+                {showPktTime ? (
+                  <td className="whitespace-nowrap px-3 py-3 font-semibold tabular-nums text-primary">
+                    {pktTime.time}
+                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">PKT</span>
+                    {pktTime.date !== istDate ? (
+                      <span className="ml-1 text-[10px] font-normal text-muted-foreground">{pktTime.date}</span>
+                    ) : null}
+                  </td>
+                ) : null}
                 <td className="px-3 py-3 font-medium">
                   {privacyMode ? firstName(booking.patientName) : booking.patientName}
+                  {booking.source === "manual" ? (
+                    <span className="ml-2 rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
+                      Manual
+                    </span>
+                  ) : null}
+                  {booking.meetingUrl ? (
+                    <a
+                      href={booking.meetingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 block text-xs font-semibold text-primary underline-offset-2 hover:underline"
+                    >
+                      Open meeting link
+                    </a>
+                  ) : null}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-muted-foreground">
                   {privacyMode ? maskCaseId(booking.caseId) : booking.caseId}
                 </td>
                 <td className="px-3 py-3">{booking.doctor}</td>
-                <td className="px-3 py-3">{booking.discoveryAgent || "—"}</td>
-                <td className="px-3 py-3">{booking.closureAgent || "—"}</td>
-                <td className="px-3 py-3">{booking.createdBy || "—"}</td>
                 <td className="px-3 py-3">
-                  <Badge
-                    variant="outline"
-                    className={overdue ? statusTone["No Photos"] : statusTone[booking.status]}
+                  <AgentNameInput
+                    value={booking.createdBy}
+                    options={agentOptions ?? []}
+                    disabled={!onCreatedByChange}
+                    label="Created by"
+                    listId={`created-by-${booking.fingerprint}`}
+                    onSave={(createdBy) => onCreatedByChange?.(booking, createdBy)}
+                  />
+                </td>
+                <td className="px-3 py-3">
+                  <AgentNameInput
+                    value={booking.closureAgent}
+                    options={agentOptions ?? []}
+                    disabled={!onClosureAgentChange}
+                    label="Closure agent"
+                    listId={`closure-${booking.fingerprint}`}
+                    onSave={(closureAgent) => onClosureAgentChange?.(booking, closureAgent)}
+                  />
+                </td>
+                <td className="px-3 py-3">
+                  <Select
+                    value={booking.status}
+                    onValueChange={(value) => onStatusChange?.(booking, value as TcBookingStatus)}
                   >
-                    {overdue ? "Awaiting outcome" : booking.status}
-                  </Badge>
+                    <SelectTrigger
+                      className={`h-8 min-w-36 text-xs font-semibold ${
+                        overdue ? statusTone["No Photos"] : statusTone[booking.status]
+                      }`}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Scheduled">Scheduled</SelectItem>
+                      <SelectItem value="Done">Done</SelectItem>
+                      <SelectItem value="No-show">No-show</SelectItem>
+                      <SelectItem value="No Photos">No Photos</SelectItem>
+                      <SelectItem value="Rescheduled">Rescheduled</SelectItem>
+                      <SelectItem value="Cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </td>
                 {showPhotos ? (
                   <td className="px-3 py-3">
@@ -360,6 +561,35 @@ function BookingTable({
                     </div>
                   </td>
                 ) : null}
+                {showPhotos ? (
+                  <td className="px-3 py-3">
+                    <select
+                      aria-label={`TC confirmation for ${booking.patientName}`}
+                      value={confirmationStatuses[booking.caseId] ?? "pending"}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        onConfirmationChange?.(
+                          booking.caseId,
+                          value === "pending" ? undefined : (value as ConfirmationStatus),
+                        );
+                      }}
+                      className={`h-9 min-w-44 rounded-lg border px-2.5 text-xs font-semibold outline-none transition-colors focus:ring-2 focus:ring-primary/20 ${
+                        confirmationStatuses[booking.caseId] === "confirmed"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                          : confirmationStatuses[booking.caseId] === "not-coming"
+                            ? "border-red-300 bg-red-50 text-red-800"
+                            : confirmationStatuses[booking.caseId] === "no-response"
+                              ? "border-amber-300 bg-amber-50 text-amber-800"
+                              : "border-border bg-card text-muted-foreground"
+                      }`}
+                    >
+                      <option value="pending">Pending confirmation</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="not-coming">Not coming</option>
+                      <option value="no-response">No response</option>
+                    </select>
+                  </td>
+                ) : null}
               </tr>
             );
           })}
@@ -379,6 +609,10 @@ function TcShiftMonitorPage() {
   const [alignedRaw, setAlignedRaw] = useState("");
   const [scheduledResult, setScheduledResult] = useState(emptyResult);
   const [alignedResult, setAlignedResult] = useState(emptyResult);
+  const [manualBookings, setManualBookings] = useState<TcBooking[]>([]);
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, TcBookingStatus>>({});
+  const [assignmentOverrides, setAssignmentOverrides] = useState<AssignmentOverrides>({});
+  const [manualForm, setManualForm] = useState<ManualTcForm>(() => manualFormForDate(todayIso()));
   const [opening, setOpening] = useState<TcShiftSnapshot | null>(null);
   const [closing, setClosing] = useState<TcShiftSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -390,22 +624,17 @@ function TcShiftMonitorPage() {
   const [doctorFilter, setDoctorFilter] = useState("all");
   const [createdByFilter, setCreatedByFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [showPktTime, setShowPktTime] = useState(true);
   const [photoStatuses, setPhotoStatuses] = useState<PhotoStatusMap>(() =>
     readPhotoStatuses(todayIso()),
+  );
+  const [confirmationStatuses, setConfirmationStatuses] = useState<ConfirmationStatusMap>(() =>
+    readConfirmationStatuses(todayIso()),
   );
   const [metricFilter, setMetricFilter] = useState<MetricFilter>("all");
   const [search, setSearch] = useState("");
   const [now, setNow] = useState(Date.now());
   const [activeTab, setActiveTab] = useState("import");
-  const closeDayKey = (date: string) => `luxora.tc-day-closed.${date}`;
-  const [dayClosed, setDayClosed] = useState(false);
-
-  useEffect(() => {
-    setDayClosed(
-      typeof window !== "undefined" &&
-        window.localStorage.getItem(closeDayKey(shiftDate)) === "1",
-    );
-  }, [shiftDate]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30000);
@@ -432,6 +661,22 @@ function TcShiftMonitorPage() {
         setAlignedResult(
           preferred ? { ...emptyResult(), bookings: preferred.alignedBookings } : emptyResult(),
         );
+        setManualBookings(
+          preferred?.scheduledBookings.filter((booking) => booking.source === "manual") ?? [],
+        );
+        const savedBookings = preferred?.scheduledBookings ?? [];
+        const parsedBookings = parseTcBookings(preferred?.scheduledRaw ?? "", "scheduled").bookings;
+        const savedByFingerprint = new Map(savedBookings.map((booking) => [booking.fingerprint, booking]));
+        setStatusOverrides(
+          Object.fromEntries(
+            parsedBookings.flatMap((booking) => {
+              const saved = savedByFingerprint.get(booking.fingerprint);
+              return saved && saved.status !== booking.status ? [[booking.fingerprint, saved.status]] : [];
+            }),
+          ),
+        );
+        setAssignmentOverrides(assignmentOverridesFromSaved(parsedBookings, savedBookings));
+        setManualForm(manualFormForDate(shiftDate));
       })
       .catch((error) => {
         if (!cancelled) setStorageWarning(String(error));
@@ -446,12 +691,23 @@ function TcShiftMonitorPage() {
 
   useEffect(() => {
     setPhotoStatuses(readPhotoStatuses(shiftDate));
+    setConfirmationStatuses(readConfirmationStatuses(shiftDate));
   }, [shiftDate]);
 
   const updatePhotoStatus = (caseId: string, status: PhotoStatus) => {
     setPhotoStatuses((current) => {
       const next = { ...current, [caseId]: status };
       window.localStorage.setItem(photoStorageKey(shiftDate), JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const updateConfirmationStatus = (caseId: string, status?: ConfirmationStatus) => {
+    setConfirmationStatuses((current) => {
+      const next = { ...current };
+      if (status) next[caseId] = status;
+      else delete next[caseId];
+      window.localStorage.setItem(confirmationStorageKey(shiftDate), JSON.stringify(next));
       return next;
     });
   };
@@ -467,14 +723,44 @@ function TcShiftMonitorPage() {
     setAlignedResult(
       snapshot ? { ...emptyResult(), bookings: snapshot.alignedBookings } : emptyResult(),
     );
+    setManualBookings(snapshot?.scheduledBookings.filter((booking) => booking.source === "manual") ?? []);
+    const savedBookings = snapshot?.scheduledBookings ?? [];
+    const parsedBookings = parseTcBookings(snapshot?.scheduledRaw ?? "", "scheduled").bookings;
+    const savedByFingerprint = new Map(savedBookings.map((booking) => [booking.fingerprint, booking]));
+    setStatusOverrides(
+      Object.fromEntries(
+        parsedBookings.flatMap((booking) => {
+          const saved = savedByFingerprint.get(booking.fingerprint);
+          return saved && saved.status !== booking.status ? [[booking.fingerprint, saved.status]] : [];
+        }),
+      ),
+    );
+    setAssignmentOverrides(assignmentOverridesFromSaved(parsedBookings, savedBookings));
   };
+
+  const applyBookingOverrides = (bookings: TcBooking[]) =>
+    bookings.map((booking) =>
+      ({
+        ...booking,
+        ...(statusOverrides[booking.fingerprint] ? { status: statusOverrides[booking.fingerprint] } : {}),
+        ...(assignmentOverrides[booking.fingerprint] ?? {}),
+      }),
+    );
 
   const parseNow = () => {
     const schedule = parseTcBookings(scheduledRaw, "scheduled");
     const aligned = parseTcBookings(alignedRaw, "aligned");
-    setScheduledResult(schedule);
-    setAlignedResult(aligned);
-    if (!schedule.bookings.length) {
+    const scheduleWithOverrides = applyBookingOverrides(schedule.bookings);
+    const alignedWithOverrides = applyBookingOverrides(aligned.bookings);
+    setScheduledResult({ ...schedule, bookings: mergeBookings(scheduleWithOverrides, manualBookings) });
+    setAlignedResult({
+      ...aligned,
+      bookings: mergeBookings(
+        alignedWithOverrides,
+        manualBookings.filter((booking) => booking.source === "manual"),
+      ),
+    });
+    if (!schedule.bookings.length && !manualBookings.length) {
       toast.error(schedule.warnings[0] || "No scheduled TC rows were found.");
       return false;
     }
@@ -485,22 +771,20 @@ function TcShiftMonitorPage() {
       toast.warning(`The pasted CRM filter date does not match ${dateLabel(shiftDate)}.`);
     } else {
       toast.success(
-        `Parsed ${schedule.bookings.length} schedule rows and ${aligned.bookings.length} alignment rows.`,
+        `Parsed ${schedule.bookings.length} schedule rows, ${aligned.bookings.length} alignment rows and ${manualBookings.length} manual rows.`,
       );
     }
     return true;
   };
 
   const saveSnapshot = async () => {
-    if (dayClosed) {
-      toast.error("This day is closed. Click Edit Day before changing it.");
-      return;
-    }
     const schedule = parseTcBookings(scheduledRaw, "scheduled");
     const aligned = parseTcBookings(alignedRaw, "aligned");
-    setScheduledResult(schedule);
-    setAlignedResult(aligned);
-    if (!schedule.bookings.length) {
+    const combinedScheduled = mergeBookings(applyBookingOverrides(schedule.bookings), manualBookings);
+    const combinedAligned = mergeBookings(applyBookingOverrides(aligned.bookings), manualBookings);
+    setScheduledResult({ ...schedule, bookings: combinedScheduled });
+    setAlignedResult({ ...aligned, bookings: combinedAligned });
+    if (!combinedScheduled.length) {
       toast.error(schedule.warnings[0] || "Paste and parse the scheduled TC list first.");
       return;
     }
@@ -512,8 +796,8 @@ function TcShiftMonitorPage() {
         phase,
         scheduledRaw,
         alignedRaw,
-        scheduledBookings: schedule.bookings,
-        alignedBookings: aligned.bookings,
+        scheduledBookings: combinedScheduled,
+        alignedBookings: combinedAligned,
         importedByName: fullName,
       });
       if (phase === "opening") setOpening(result.snapshot);
@@ -530,11 +814,150 @@ function TcShiftMonitorPage() {
     }
   };
 
-  const deleteSnapshot = async () => {
-    if (dayClosed) {
-      toast.error("This day is closed. Click Edit Day before deleting a snapshot.");
+  const persistManualChanges = async (
+    nextManualBookings: TcBooking[],
+    nextStatusOverrides: Record<string, TcBookingStatus>,
+    nextAssignmentOverrides: AssignmentOverrides,
+  ) => {
+    const applyOverrides = (bookings: TcBooking[]) =>
+      bookings.map((booking) =>
+        ({
+          ...booking,
+          ...(nextStatusOverrides[booking.fingerprint]
+            ? { status: nextStatusOverrides[booking.fingerprint] }
+            : {}),
+          ...(nextAssignmentOverrides[booking.fingerprint] ?? {}),
+        }),
+      );
+    const schedule = parseTcBookings(scheduledRaw, "scheduled");
+    const aligned = parseTcBookings(alignedRaw, "aligned");
+    const scheduledBookings = mergeBookings(applyOverrides(schedule.bookings), nextManualBookings);
+    const alignedBookings = mergeBookings(applyOverrides(aligned.bookings), nextManualBookings);
+
+    try {
+      const result = await saveTcShiftSnapshot({
+        shiftDate,
+        phase,
+        scheduledRaw,
+        alignedRaw,
+        scheduledBookings,
+        alignedBookings,
+        importedByName: fullName,
+      });
+      if (phase === "opening") setOpening(result.snapshot);
+      else setClosing(result.snapshot);
+      setCloudAvailable(result.cloudSaved || cloudAvailable);
+      if (result.warning) toast.warning(result.warning);
+    } catch (error) {
+      console.error(error);
+      toast.error("Your change is visible, but it could not be saved. Please use Save Snapshot.");
+    }
+  };
+
+  const addManualTc = async () => {
+    const patientName = manualForm.patientName.trim();
+    const istTime = manualForm.istTime.trim();
+    if (!patientName || !manualForm.istDate || !/^\d{2}:\d{2}$/.test(istTime)) {
+      toast.error("Enter the patient name, TC date and IST time (HH:MM).");
       return;
     }
+    if (manualForm.meetingUrl.trim() && !/^https?:\/\//i.test(manualForm.meetingUrl.trim())) {
+      toast.error("Meeting link must begin with https:// or http://.");
+      return;
+    }
+
+    const suppliedCaseId = manualForm.caseId.trim();
+    const caseId = suppliedCaseId || `MANUAL-${Date.now().toString().slice(-8)}`;
+    const fingerprint = [caseId, manualForm.istDate, istTime, manualForm.doctor || "manual"]
+      .map((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, ""))
+      .join("|");
+    const booking: TcBooking = {
+      source: "manual",
+      scheduleLabel: "Manual TC entry",
+      scheduleDate: manualForm.istDate,
+      istDate: manualForm.istDate,
+      patientTime: istTime,
+      patientTimezone: "IST",
+      istTime,
+      status: manualForm.status,
+      patientName,
+      caseId,
+      doctor: manualForm.doctor.trim() || "Doctor not assigned",
+      doctorEmail: "",
+      meetingUrl: manualForm.meetingUrl.trim() || undefined,
+      discoveryAgent: "",
+      closureAgent: manualForm.closureAgent.trim(),
+      createdBy: manualForm.createdBy.trim() || fullName || "Manual entry",
+      joiners: 0,
+      isPast: false,
+      fingerprint,
+    };
+
+    const nextManual = mergeBookings(manualBookings, [booking]);
+    setManualBookings(nextManual);
+    setScheduledResult((current) => ({ ...current, bookings: mergeBookings(current.bookings, [booking]) }));
+    if (manualForm.countAsAligned) {
+    setAlignedResult((current) => ({ ...current, bookings: mergeBookings(current.bookings, [booking]) }));
+    }
+    setManualForm(manualFormForDate(shiftDate));
+    await persistManualChanges(nextManual, statusOverrides, assignmentOverrides);
+    toast.success("Manual TC added and saved.");
+  };
+
+  const removeManualTc = async (fingerprint: string) => {
+    const nextManual = manualBookings.filter((booking) => booking.fingerprint !== fingerprint);
+    setManualBookings(nextManual);
+    setScheduledResult((current) => ({
+      ...current,
+      bookings: current.bookings.filter((booking) => booking.fingerprint !== fingerprint),
+    }));
+    setAlignedResult((current) => ({
+      ...current,
+      bookings: current.bookings.filter((booking) => booking.fingerprint !== fingerprint),
+    }));
+    await persistManualChanges(nextManual, statusOverrides, assignmentOverrides);
+    toast.success("Manual TC removed and saved.");
+  };
+
+  const updateTcStatus = async (booking: TcBooking, status: TcBookingStatus) => {
+    const fingerprint = booking.fingerprint;
+    const update = (booking: TcBooking) =>
+      booking.fingerprint === fingerprint ? { ...booking, status } : booking;
+    const nextManual = booking.source === "manual" ? manualBookings.map(update) : manualBookings;
+    const nextOverrides =
+      booking.source === "manual" ? statusOverrides : { ...statusOverrides, [fingerprint]: status };
+    if (booking.source === "manual") setManualBookings(nextManual);
+    else setStatusOverrides(nextOverrides);
+    setScheduledResult((current) => ({ ...current, bookings: current.bookings.map(update) }));
+    setAlignedResult((current) => ({ ...current, bookings: current.bookings.map(update) }));
+    await persistManualChanges(nextManual, nextOverrides, assignmentOverrides);
+    toast.success(`TC marked ${status} and saved.`);
+  };
+
+  const updateTcAssignment = async (
+    booking: TcBooking,
+    field: "createdBy" | "closureAgent",
+    value: string,
+  ) => {
+    const fingerprint = booking.fingerprint;
+    const update = (row: TcBooking) => row.fingerprint === fingerprint ? { ...row, [field]: value } : row;
+    const nextManual = booking.source === "manual" ? manualBookings.map(update) : manualBookings;
+    const currentOverride = assignmentOverrides[fingerprint] ?? {
+      createdBy: booking.createdBy,
+      closureAgent: booking.closureAgent,
+    };
+    const nextAssignments = booking.source === "manual"
+      ? assignmentOverrides
+      : { ...assignmentOverrides, [fingerprint]: { ...currentOverride, [field]: value } };
+    if (booking.source === "manual") setManualBookings(nextManual);
+    else setAssignmentOverrides(nextAssignments);
+    setScheduledResult((current) => ({ ...current, bookings: current.bookings.map(update) }));
+    setAlignedResult((current) => ({ ...current, bookings: current.bookings.map(update) }));
+    await persistManualChanges(nextManual, statusOverrides, nextAssignments);
+    toast.success(`${field === "createdBy" ? "Created by" : "Closure"} updated and saved.`);
+  };
+
+  const deleteSnapshot = async () => {
     const label = phase === "opening" ? "Opening" : "Closing";
     if (
       !window.confirm(
@@ -593,7 +1016,7 @@ function TcShiftMonitorPage() {
   );
   const createdByOptions = useMemo(
     () =>
-      [...new Set(effective.map((booking) => booking.createdBy).filter(Boolean))].sort((a, b) =>
+      [...new Set([...TEAM_AGENTS, ...effective.map((booking) => booking.createdBy), ...effective.map((booking) => booking.closureAgent)].filter(Boolean))].sort((a, b) =>
         a.localeCompare(b),
       ),
     [effective],
@@ -602,6 +1025,9 @@ function TcShiftMonitorPage() {
     if (metricFilter === "aligned") return alignedRows;
     if (metricFilter === "rescheduled") {
       return latest.bookings.filter((booking) => booking.status === "Rescheduled");
+    }
+    if (metricFilter === "cancelled") {
+      return effective.filter((booking) => booking.status === "Cancelled");
     }
     if (metricFilter === "done") {
       return effective.filter((booking) => booking.status === "Done");
@@ -625,7 +1051,7 @@ function TcShiftMonitorPage() {
     if (statusFilter !== "all" && booking.status !== statusFilter) return false;
     if (!search.trim()) return true;
     const haystack =
-      `${booking.patientName} ${booking.caseId} ${booking.discoveryAgent} ${booking.closureAgent}`.toLowerCase();
+      `${booking.patientName} ${booking.caseId} ${booking.createdBy} ${booking.closureAgent}`.toLowerCase();
     return haystack.includes(search.trim().toLowerCase());
   });
   const nextBooking = effective.find(
@@ -665,18 +1091,20 @@ function TcShiftMonitorPage() {
     const lines = effective.map((booking) => {
       const patient = privacyMode ? firstName(booking.patientName) : booking.patientName;
       const caseId = privacyMode ? maskCaseId(booking.caseId) : booking.caseId;
-      return `${booking.istTime} IST — ${patient} (${caseId}) — ${booking.doctor} — ${booking.status}`;
+      const photos = photoStatuses[booking.caseId] === "yes" ? "Yes" : photoStatuses[booking.caseId] === "no" ? "No" : "Not marked";
+      const confirmation = confirmationStatuses[booking.caseId] === "confirmed" ? "Confirmed" : confirmationStatuses[booking.caseId] === "not-coming" ? "Not coming" : confirmationStatuses[booking.caseId] === "no-response" ? "No response" : "Pending";
+      return `${booking.istTime} IST — ${patient} (${caseId}) — ${booking.doctor} — ${booking.status} | Photos: ${photos} | TC confirmation: ${confirmation}`;
     });
     return [
       `*CureMeAbroad TC Shift Update — ${dateLabel(shiftDate)}*`,
       `Active TCs: ${metrics.totalUnique} | Aligned today: ${alignedRows.length}`,
-      `Done: ${metrics.done} | No-show: ${metrics.noShow} | Pending: ${metrics.scheduled} | Reschedule events: ${metrics.rescheduleEvents}`,
+      `Done: ${metrics.done} | No-show: ${metrics.noShow} | Scheduled: ${metrics.scheduled} | Reschedule events: ${metrics.rescheduleEvents}`,
       "",
       ...lines,
       "",
       `_Last refreshed: ${latest.updatedAt ? fmtIstTimestamp(latest.updatedAt) : "Preview"}_`,
     ].join("\n");
-  }, [effective, privacyMode, shiftDate, metrics, alignedRows.length, latest.updatedAt]);
+  }, [effective, privacyMode, shiftDate, metrics, alignedRows.length, latest.updatedAt, photoStatuses, confirmationStatuses]);
 
   const copyWhatsApp = async () => {
     await navigator.clipboard.writeText(whatsappText);
@@ -701,45 +1129,6 @@ function TcShiftMonitorPage() {
       console.error(error);
       toast.error("Image could not be generated.");
     }
-  };
-
-  const editClosedDay = () => {
-    window.localStorage.removeItem(closeDayKey(shiftDate));
-    setDayClosed(false);
-    toast.info(`${dateLabel(shiftDate)} unlocked for editing. Save a new closing snapshot, then close the day again.`);
-  };
-
-  const closeDay = () => {
-    if (!closing) {
-      toast.error("Save the Closing Snapshot before closing the day.");
-      setPhase("closing");
-      setActiveTab("import");
-      return;
-    }
-
-    const unresolved = metrics.scheduled;
-    if (unresolved > 0) {
-      const ok = window.confirm(
-        `${unresolved} TC${unresolved === 1 ? " is" : "s are"} still pending/overdue. Close ${dateLabel(shiftDate)} anyway?`,
-      );
-      if (!ok) return;
-    }
-
-    window.localStorage.setItem(closeDayKey(shiftDate), "1");
-    setDayClosed(true);
-
-    const next = new Date(`${shiftDate}T00:00:00`);
-    next.setDate(next.getDate() + 1);
-    const nextDate = [
-      next.getFullYear(),
-      String(next.getMonth() + 1).padStart(2, "0"),
-      String(next.getDate()).padStart(2, "0"),
-    ].join("-");
-
-    toast.success(`${dateLabel(shiftDate)} closed. Opening ${dateLabel(nextDate)}.`);
-    setShiftDate(nextDate);
-    setPhase("opening");
-    setActiveTab("import");
   };
 
   return (
@@ -789,25 +1178,6 @@ function TcShiftMonitorPage() {
               {cloudAvailable ? <Cloud className="size-4" /> : <CloudOff className="size-4" />}
               {cloudAvailable ? "Cloud snapshots" : "Browser storage"}
             </Badge>
-            {dayClosed ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 rounded-xl border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                onClick={editClosedDay}
-              >
-                <ShieldCheck className="size-4" /> Edit Day
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                className="h-10 rounded-xl"
-                onClick={closeDay}
-                disabled={saving || loading}
-              >
-                <CheckCircle2 className="size-4" /> Close Day
-              </Button>
-            )}
           </div>
         </section>
 
@@ -885,7 +1255,6 @@ function TcShiftMonitorPage() {
                     ) : null}
                   </div>
                   <Textarea
-                    disabled={dayClosed}
                     value={scheduledRaw}
                     onChange={(event) => setScheduledRaw(event.target.value)}
                     placeholder="Paste the complete Scheduled CRM text here…"
@@ -911,13 +1280,155 @@ function TcShiftMonitorPage() {
                     ) : null}
                   </div>
                   <Textarea
-                    disabled={dayClosed}
                     value={alignedRaw}
                     onChange={(event) => setAlignedRaw(event.target.value)}
                     placeholder="Paste the complete Aligned CRM text here…"
                     className="mt-4 min-h-72 resize-y rounded-xl font-mono text-xs leading-relaxed"
                   />
                 </div>
+              </section>
+
+              <section className="rounded-2xl border border-violet-200 bg-violet-50/40 p-5 shadow-soft">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-violet-950">3. Add a manual TC</h2>
+                    <p className="mt-1 text-xs text-violet-800">
+                      Use this when a meeting link was sent directly and the CRM has no booking. A manual entry counts as both a Scheduled TC and TC Aligned.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="border-violet-200 bg-white text-violet-700">
+                    {manualBookings.length} manual {manualBookings.length === 1 ? "entry" : "entries"}
+                  </Badge>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="space-y-1.5 xl:col-span-2">
+                    <Label htmlFor="manual-patient">Patient name *</Label>
+                    <Input
+                      id="manual-patient"
+                      value={manualForm.patientName}
+                      onChange={(event) => setManualForm((current) => ({ ...current, patientName: event.target.value }))}
+                      placeholder="Patient name"
+                      className="bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="manual-case-id">Case ID (optional)</Label>
+                    <Input
+                      id="manual-case-id"
+                      value={manualForm.caseId}
+                      onChange={(event) => setManualForm((current) => ({ ...current, caseId: event.target.value }))}
+                      placeholder="CMA-..."
+                      className="bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="manual-status">Current status</Label>
+                    <Select
+                      value={manualForm.status}
+                      onValueChange={(value) => setManualForm((current) => ({ ...current, status: value as TcBookingStatus }))}
+                    >
+                      <SelectTrigger id="manual-status" className="bg-white"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Scheduled">Scheduled</SelectItem>
+                        <SelectItem value="Done">Done</SelectItem>
+                        <SelectItem value="No-show">No-show</SelectItem>
+                        <SelectItem value="No Photos">No Photos</SelectItem>
+                        <SelectItem value="Rescheduled">Rescheduled</SelectItem>
+                        <SelectItem value="Cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="manual-date">TC date *</Label>
+                    <Input
+                      id="manual-date"
+                      type="date"
+                      value={manualForm.istDate}
+                      onChange={(event) => setManualForm((current) => ({ ...current, istDate: event.target.value }))}
+                      className="bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="manual-time">IST time *</Label>
+                    <Input
+                      id="manual-time"
+                      type="time"
+                      value={manualForm.istTime}
+                      onChange={(event) => setManualForm((current) => ({ ...current, istTime: event.target.value }))}
+                      className="bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="manual-doctor">Doctor</Label>
+                    <Input
+                      id="manual-doctor"
+                      value={manualForm.doctor}
+                      onChange={(event) => setManualForm((current) => ({ ...current, doctor: event.target.value }))}
+                      placeholder="Dr. Shumail"
+                      className="bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="manual-created-by">Created by</Label>
+                    <Input
+                      id="manual-created-by"
+                      value={manualForm.createdBy}
+                      list="manual-created-by-suggestions"
+                      onChange={(event) => setManualForm((current) => ({ ...current, createdBy: event.target.value }))}
+                      placeholder={fullName || "Type or select agent"}
+                      className="bg-white"
+                    />
+                    <datalist id="manual-created-by-suggestions">
+                      {createdByOptions.map((agent) => <option key={agent} value={agent} />)}
+                    </datalist>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="manual-closure">Closure agent</Label>
+                    <Input
+                      id="manual-closure"
+                      value={manualForm.closureAgent}
+                      list="manual-closure-suggestions"
+                      onChange={(event) => setManualForm((current) => ({ ...current, closureAgent: event.target.value }))}
+                      placeholder="Type or select agent"
+                      className="bg-white"
+                    />
+                    <datalist id="manual-closure-suggestions">
+                      {createdByOptions.map((agent) => <option key={agent} value={agent} />)}
+                    </datalist>
+                  </div>
+                  <div className="space-y-1.5 md:col-span-2 xl:col-span-3">
+                    <Label htmlFor="manual-link">Meeting link (optional)</Label>
+                    <Input
+                      id="manual-link"
+                      type="url"
+                      value={manualForm.meetingUrl}
+                      onChange={(event) => setManualForm((current) => ({ ...current, meetingUrl: event.target.value }))}
+                      placeholder="https://meet.google.com/..."
+                      className="bg-white"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button className="w-full bg-violet-700 hover:bg-violet-800" onClick={addManualTc}>
+                      <Plus className="size-4" /> Add manual TC
+                    </Button>
+                  </div>
+                </div>
+
+                {manualBookings.length ? (
+                  <div className="mt-4 space-y-2 border-t border-violet-200 pt-4">
+                    {manualBookings.map((booking) => (
+                      <div key={booking.fingerprint} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm">
+                        <span>
+                          <strong>{booking.patientName}</strong> · {booking.istDate} {booking.istTime} IST · {booking.status}
+                        </span>
+                        <Button variant="ghost" size="sm" className="text-red-700 hover:bg-red-50 hover:text-red-800" onClick={() => removeManualTc(booking.fingerprint)}>
+                          <Trash2 className="size-4" /> Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </section>
 
               <div className="flex flex-wrap justify-end gap-3">
@@ -978,6 +1489,7 @@ function TcShiftMonitorPage() {
                 bookings={scheduledResult.bookings}
                 privacyMode={privacyMode}
                 now={now}
+                agentOptions={createdByOptions}
               />
             </TabsContent>
 
@@ -1024,7 +1536,15 @@ function TcShiftMonitorPage() {
                   onClick={() => applyMetricFilter("rescheduled")}
                 />
                 <Kpi
-                  label="Pending"
+                  label="Cancelled"
+                  value={metrics.cancelled}
+                  icon={Trash2}
+                  tone="text-slate-600"
+                  active={metricFilter === "cancelled"}
+                  onClick={() => applyMetricFilter("cancelled")}
+                />
+                <Kpi
+                  label="Scheduled"
                   value={metrics.scheduled}
                   icon={Clock3}
                   tone="text-blue-600"
@@ -1063,7 +1583,7 @@ function TcShiftMonitorPage() {
                           hour12: false,
                         })}{" "}
                         IST · {currentBooking.doctor} ·{" "}
-                        {currentBooking.discoveryAgent || "No discovery agent"}
+                        {currentBooking.createdBy || "Created by not assigned"}
                       </p>
                     </div>
                   ) : (
@@ -1168,6 +1688,7 @@ function TcShiftMonitorPage() {
                             "No-show",
                             "No Photos",
                             "Rescheduled",
+                            "Cancelled",
                           ] as TcBookingStatus[]
                         ).map((status) => (
                           <SelectItem key={status} value={status}>
@@ -1176,6 +1697,17 @@ function TcShiftMonitorPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    <div className="flex h-9 items-center gap-2 rounded-xl border border-border bg-card px-3">
+                      <Label htmlFor="show-pkt-time" className="cursor-pointer text-xs font-medium text-muted-foreground">
+                        Show PKT time
+                      </Label>
+                      <Switch
+                        id="show-pkt-time"
+                        checked={showPktTime}
+                        onCheckedChange={setShowPktTime}
+                        aria-label="Show Pakistan time column"
+                      />
+                    </div>
                   </div>
                 </div>
                 <BookingTable
@@ -1186,6 +1718,13 @@ function TcShiftMonitorPage() {
                   showPhotos
                   photoStatuses={photoStatuses}
                   onPhotoChange={updatePhotoStatus}
+                  confirmationStatuses={confirmationStatuses}
+                  onConfirmationChange={updateConfirmationStatus}
+                  onStatusChange={updateTcStatus}
+                  agentOptions={createdByOptions}
+                  onCreatedByChange={(booking, createdBy) => updateTcAssignment(booking, "createdBy", createdBy)}
+                  onClosureAgentChange={(booking, closureAgent) => updateTcAssignment(booking, "closureAgent", closureAgent)}
+                  showPktTime={showPktTime}
                 />
               </section>
             </TabsContent>
@@ -1358,6 +1897,9 @@ function TcShiftMonitorPage() {
                   bookings={latest.bookings}
                   alignedToday={alignedRows.length}
                   privacyMode={privacyMode}
+                  photoStatuses={photoStatuses}
+                  confirmationStatuses={confirmationStatuses}
+                  showPktTime={showPktTime}
                   {...(latest.updatedAt ? { importedAt: latest.updatedAt } : {})}
                 />
               </div>

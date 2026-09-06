@@ -41,12 +41,20 @@ function AgentsPage() {
     return onStoreChange(() => setRoster(getRoster()));
   }, []);
 
-  const persist = (list: RosterAgent[]) => {
-    setRoster(list);
-    saveRoster(list);
+  const persist = async (list: RosterAgent[]) => {
+    try {
+      await saveRoster(list);
+      setRoster(getRoster());
+      return true;
+    } catch (error) {
+      console.error("Failed to save roster", error);
+      toast.error(error instanceof Error ? error.message : "Could not save the agent.");
+      setRoster(getRoster());
+      return false;
+    }
   };
 
-  const addAgent = () => {
+  const addAgent = async () => {
     const n = name.trim();
     if (!n) {
       toast.error("Enter an agent name.");
@@ -60,12 +68,14 @@ function AgentsPage() {
       toast.error("That agent already exists.");
       return;
     }
-    persist([...roster, { id: crypto.randomUUID(), name: n, active: true }]);
-    setName("");
-    toast.success(`${n} added`);
+    const saved = await persist([...roster, { id: crypto.randomUUID(), name: n, active: true }]);
+    if (saved) {
+      setName("");
+      toast.success(`${n} added`);
+    }
   };
 
-  const saveEdit = (id: string) => {
+  const saveEdit = async (id: string) => {
     const n = editValue.trim();
     if (!n) {
       toast.error("Name cannot be empty.");
@@ -75,19 +85,22 @@ function AgentsPage() {
       toast.error("That agent already exists.");
       return;
     }
-    persist(roster.map((r) => (r.id === id ? { ...r, name: n } : r)));
-    setEditingId(null);
-    toast.success("Agent updated");
+    if (await persist(roster.map((r) => (r.id === id ? { ...r, name: n } : r)))) {
+      setEditingId(null);
+      toast.success("Agent updated");
+    }
   };
 
-  const toggleActive = (a: RosterAgent) => {
-    persist(roster.map((r) => (r.id === a.id ? { ...r, active: !r.active } : r)));
-    toast.success(`${a.name} marked ${a.active ? "inactive" : "active"}`);
+  const toggleActive = async (a: RosterAgent) => {
+    if (await persist(roster.map((r) => (r.id === a.id ? { ...r, active: !r.active } : r)))) {
+      toast.success(`${a.name} marked ${a.active ? "inactive" : "active"}`);
+    }
   };
 
-  const remove = (a: RosterAgent) => {
-    persist(roster.filter((r) => r.id !== a.id));
-    toast.success(`${a.name} removed`);
+  const remove = async (a: RosterAgent) => {
+    if (await persist(roster.filter((r) => r.id !== a.id))) {
+      toast.success(`${a.name} removed`);
+    }
   };
 
   return (

@@ -25,6 +25,34 @@ export type SnapshotSaveResult = {
   warning?: string | undefined;
 };
 
+export type TcLiveState = {
+  shiftDate: string;
+  scheduledBookings: TcBooking[];
+  alignedBookings: TcBooking[];
+  crmScheduledCount?: number | null;
+  crmAlignedCount?: number | null;
+  updatedBy?: string;
+  updatedByName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type LiveStateSaveResult = {
+  liveState: TcLiveState;
+  cloudSaved: boolean;
+  warning?: string | undefined;
+};
+
+type TcLiveStateRow = {
+  shift_date: string;
+  scheduled_data: Json;
+  aligned_data: Json;
+  updated_by: string | null;
+  updated_by_name: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DoctorScheduleBooking = Pick<
   TcBooking,
   | "istDate"
@@ -33,7 +61,7 @@ export type DoctorScheduleBooking = Pick<
   | "patientName"
   | "caseId"
   | "doctor"
-  | "discoveryAgent"
+  | "createdBy"
   | "closureAgent"
 >;
 
@@ -103,14 +131,14 @@ const missingTable = (error: { code?: string; message?: string } | null) =>
 
 const doctorScheduleBookings = (bookings: TcBooking[]): DoctorScheduleBooking[] =>
   bookings.map(
-    ({ istDate, istTime, status, patientName, caseId, doctor, discoveryAgent, closureAgent }) => ({
+    ({ istDate, istTime, status, patientName, caseId, doctor, createdBy, closureAgent }) => ({
       istDate,
       istTime,
       status,
       patientName,
       caseId,
       doctor,
-      discoveryAgent,
+      createdBy,
       closureAgent,
     }),
   );
@@ -174,6 +202,117 @@ export async function loadTcShiftSnapshots(shiftDate: string) {
   return { opening, closing, cloudAvailable: true, warning: "" };
 }
 
+type TcLiveJsonPayload = {
+  schemaVersion?: number;
+  bookings?: TcBooking[];
+  crmCount?: number | null;
+};
+
+function readCrmHeaderCount(raw: string, label: "Aligned" | "Scheduled"): number | null {
+  const match = raw.match(new RegExp(`^\\s*${label}:\\s*(\\d+)\\s*$`, "im"));
+  return match ? Number(match[1]) : null;
+}
+
+function decodeTcLiveJson(value: Json): { bookings: TcBooking[]; crmCount: number | null } {
+  if (Array.isArray(value)) {
+    return { bookings: value as unknown as TcBooking[], crmCount: null };
+  }
+  if (value && typeof value === "object") {
+    const payload = value as unknown as TcLiveJsonPayload;
+    return {
+      bookings: Array.isArray(payload.bookings) ? payload.bookings : [],
+      crmCount: typeof payload.crmCount === "number" && Number.isFinite(payload.crmCount)
+        ? payload.crmCount
+        : null,
+    };
+  }
+  return { bookings: [], crmCount: null };
+}
+
+function encodeTcLiveJson(bookings: TcBooking[], crmCount: number | null): Json {
+  return {
+    schemaVersion: 2,
+    bookings: bookings as unknown as Json,
+    crmCount,
+  } as Json;
+}
+
+function rowToLiveState(row: TcLiveStateRow): TcLiveState {
+  const scheduled = decodeTcLiveJson(row.scheduled_data ?? []);
+  const aligned = decodeTcLiveJson(row.aligned_data ?? []);
+  const state: TcLiveState = {
+    shiftDate: row.shift_date,
+    scheduledBookings: scheduled.bookings,
+    alignedBookings: aligned.bookings,
+    crmScheduledCount: scheduled.crmCount,
+    crmAlignedCount: aligned.crmCount,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  if (row.updated_by) state.updatedBy = row.updated_by;
+  if (row.updated_by_name) state.updatedByName = row.updated_by_name;
+  return state;
+}
+
+/**
+ * Publish the latest date-level TC state for QSYS Monthly History.
+ * The generated Supabase types do not currently include tc_live_state, so
+ * this call intentionally uses `supabase as any` rather than replacing the
+ * project's generated types file.
+ */
+export async function saveTcLiveState(input: {
+  shiftDate: string;
+  scheduledBookings: TcBooking[];
+  alignedBookings: TcBooking[];
+  crmScheduledCount?: number | null;
+  crmAlignedCount?: number | null;
+  updatedByName?: string;
+}): Promise<LiveStateSaveResult> {
+  const now = new Date().toISOString();
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id ?? null;
+  const payload = {
+    shift_date: input.shiftDate,
+    scheduled_data: encodeTcLiveJson(input.scheduledBookings, input.crmScheduledCount ?? null),
+    aligned_data: encodeTcLiveJson(input.alignedBookings, input.crmAlignedCount ?? null),
+    updated_by: userId,
+    updated_by_name: input.updatedByName || auth.user?.email || null,
+    updated_at: now,
+  };
+
+  const { data, error } = await (supabase as any)
+    .from("tc_live_state")
+    .upsert(payload, { onConflict: "shift_date" })
+    .select(
+      "shift_date, scheduled_data, aligned_data, updated_by, updated_by_name, created_at, updated_at",
+    )
+    .single();
+
+  if (error) {
+    const fallback: TcLiveState = {
+      shiftDate: input.shiftDate,
+      scheduledBookings: input.scheduledBookings,
+      alignedBookings: input.alignedBookings,
+      crmScheduledCount: input.crmScheduledCount ?? null,
+      crmAlignedCount: input.crmAlignedCount ?? null,
+      updatedAt: now,
+      ...(input.updatedByName ? { updatedByName: input.updatedByName } : {}),
+    };
+    return {
+      liveState: fallback,
+      cloudSaved: false,
+      warning: missingTable(error)
+        ? "Live TC sync table is not available."
+        : `Live TC sync failed: ${error.message}`,
+    };
+  }
+
+  return {
+    liveState: rowToLiveState(data as TcLiveStateRow),
+    cloudSaved: true,
+  };
+}
+
 export async function saveTcShiftSnapshot(snapshot: TcShiftSnapshot): Promise<SnapshotSaveResult> {
   const now = new Date().toISOString();
   const localSnapshot = { ...snapshot, updatedAt: now };
@@ -200,17 +339,39 @@ export async function saveTcShiftSnapshot(snapshot: TcShiftSnapshot): Promise<Sn
     .single();
 
   const doctorScheduleError = await publishDoctorSchedule(snapshot, now);
+  // QSYS Monthly History needs the CRM funnel totals, not the number of visible
+  // booking rows. Reschedules can create extra rows (for example 13 visible
+  // aligned rows while the CRM header correctly says Aligned: 12).
+  const crmScheduledCount =
+    readCrmHeaderCount(snapshot.scheduledRaw, "Scheduled") ??
+    readCrmHeaderCount(snapshot.alignedRaw, "Scheduled");
+  const crmAlignedCount =
+    readCrmHeaderCount(snapshot.alignedRaw, "Aligned") ??
+    readCrmHeaderCount(snapshot.scheduledRaw, "Aligned");
+  const liveStateResult = await saveTcLiveState({
+    shiftDate: snapshot.shiftDate,
+    scheduledBookings: snapshot.scheduledBookings,
+    alignedBookings: snapshot.alignedBookings,
+    crmScheduledCount,
+    crmAlignedCount,
+    updatedByName: snapshot.importedByName,
+  });
 
   if (error) {
     return {
       snapshot: localSnapshot,
       cloudSaved: false,
       doctorSchedulePublished: !doctorScheduleError,
-      warning: missingTable(error)
-        ? doctorScheduleError
-          ? "Saved in this browser only. Run the supplied Supabase setup SQL to publish the doctor schedule."
-          : "Saved in this browser and published to the doctor schedule."
-        : `Saved in this browser, but cloud save failed: ${error.message}`,
+      warning: [
+        missingTable(error)
+          ? doctorScheduleError
+            ? "Saved in this browser only. Run the supplied Supabase setup SQL to publish the doctor schedule."
+            : "Saved in this browser and published to the doctor schedule."
+          : `Saved in this browser, but cloud save failed: ${error.message}`,
+        liveStateResult.warning,
+      ]
+        .filter(Boolean)
+        .join(" "),
     };
   }
 
@@ -220,9 +381,14 @@ export async function saveTcShiftSnapshot(snapshot: TcShiftSnapshot): Promise<Sn
     snapshot: saved,
     cloudSaved: true,
     doctorSchedulePublished: !doctorScheduleError,
-    warning: doctorScheduleError
-      ? `Snapshot saved, but doctor schedule was not published: ${doctorScheduleError.message}`
-      : undefined,
+    warning: [
+      doctorScheduleError
+        ? `Snapshot saved, but doctor schedule was not published: ${doctorScheduleError.message}`
+        : undefined,
+      liveStateResult.warning,
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined,
   };
 }
 

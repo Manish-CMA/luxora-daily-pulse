@@ -79,11 +79,7 @@ function downloadPeriodCsv(reports: SavedReport[], from: string, to: string) {
     "Calls Made",
     "Calls Picked",
     "Pickup Rate",
-    "Pre-TC",
-    "Pre-TC to TC",
-    "Pre-TC to TC Rate",
-    "Direct TC",
-    "Pending Pre-TC",
+    "TCs Aligned",
     "TCs Lined Up",
     "TC Scheduled",
     "TC Done",
@@ -105,11 +101,7 @@ function downloadPeriodCsv(reports: SavedReport[], from: string, to: string) {
         totals.callsMade,
         totals.callsPicked,
         fmtPct(totals.pickupRate),
-        totals.preTc,
-        totals.preTcToTc,
-        fmtPct(totals.preTcToTcRate),
         totals.directTc,
-        totals.pendingPreTc,
         totals.totalTcsLinedUp,
         totals.totalTcScheduled,
         totals.totalTcDone,
@@ -321,24 +313,7 @@ function ReportsPage() {
             icon={PhoneCall}
             tone="primary"
           />
-          <KpiCard
-            label="Total Pre-TCs"
-            value={totals.preTc}
-            icon={ClipboardList}
-            tone="default"
-          />
-          <KpiCard
-            label="Pending Pre-TC"
-            value={totals.pendingPreTc}
-            icon={ClipboardList}
-            tone="warning"
-          />
-          <KpiCard
-            label="Pre-TC → TC"
-            value={totals.preTcToTc}
-            icon={ArrowRightLeft}
-            tone="success"
-          />
+          <KpiCard label="TCs Aligned" value={totals.directTc} icon={Target} tone="success" />
           <KpiCard
             label="Total TCs Lined Up"
             value={totals.totalTcsLinedUp}
@@ -364,12 +339,6 @@ function ReportsPage() {
             tone="primary"
           />
           <KpiCard
-            label="Pre-TC → TC Rate"
-            value={fmtPct(totals.preTcToTcRate)}
-            icon={Percent}
-            tone="success"
-          />
-          <KpiCard
             label="TC Completion Rate"
             value={fmtPct(totals.tcCompletionRate)}
             icon={Percent}
@@ -385,10 +354,7 @@ function ReportsPage() {
             <dl className="mt-4 space-y-2 text-sm">
               {[
                 ["Reports Included", range.length],
-                ["Total Pre-TCs", totals.preTc],
-                ["Total Pre-TC → TC", totals.preTcToTc],
-                ["Pending Pre-TC", totals.pendingPreTc],
-                ["Total Direct TC", totals.directTc],
+                ["TCs Aligned", totals.directTc],
                 ["Total TCs Lined Up", totals.totalTcsLinedUp],
                 ["TC Scheduled", totals.totalTcScheduled],
                 ["TC Done", totals.totalTcDone],
@@ -416,11 +382,6 @@ function ReportsPage() {
                   label: "Pickup Rate",
                   value: totals.pickupRate,
                   tone: "bg-primary",
-                },
-                {
-                  label: "Pre-TC → TC",
-                  value: totals.preTcToTcRate,
-                  tone: "bg-success",
                 },
                 {
                   label: "TC Completion Rate",
@@ -481,8 +442,6 @@ function ReportsPage() {
                     <b className="text-foreground">
                       {agentTcsLinedUp(c.agent)}
                     </b>
-                    {" · "}Pre-TC → TC:{" "}
-                    <b className="text-foreground">{c.agent.preTcToTc}</b>
                     {" · "}Calls Picked:{" "}
                     <b className="text-foreground">{c.agent.callsPicked}</b>
                   </p>

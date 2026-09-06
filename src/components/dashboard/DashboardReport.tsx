@@ -25,9 +25,7 @@ import {
 const LEADER_ITEMS: { field: NumericField; title: string }[] = [
   { field: "callsMade", title: "Most Calls Made" },
   { field: "callsPicked", title: "Most Calls Picked" },
-  { field: "preTc", title: "Most Pre-TCs" },
-  { field: "preTcToTc", title: "Most Pre-TC → TC" },
-  { field: "directTc", title: "Most Direct TCs" },
+  { field: "directTc", title: "Most TCs Aligned" },
 ];
 
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -76,10 +74,7 @@ export const DashboardReport = forwardRef<
     ["Total Calls Made", String(totals.callsMade)],
     ["Total Calls Picked", String(totals.callsPicked)],
     ["Pickup Rate", fmtPct(totals.pickupRate)],
-    ["Total Pre-TCs", String(totals.preTc)],
-    ["Pre-TC → TC", String(totals.preTcToTc)],
-    ["Pending Pre-TCs", String(totals.pendingPreTc)],
-    ["Direct TCs", String(totals.directTc)],
+    ["TCs Aligned", String(totals.directTc)],
     [`TC Scheduled on ${shortDate}`, String(totals.totalTcScheduled)],
     ["TC Done", String(totals.totalTcDone)],
     ["TC Completion Rate", fmtPct(totals.tcCompletionRate)],
@@ -133,23 +128,19 @@ export const DashboardReport = forwardRef<
             <div
               key={label}
               className={
-                label === "Pending Pre-TCs"
-                  ? "rounded-xl border border-red-200 bg-red-50 p-4"
-                  : "rounded-xl border border-border bg-secondary/40 p-4"
+                "rounded-xl border border-border bg-secondary/40 p-4"
               }
             >
               <p
                 className={`text-[11px] font-medium uppercase tracking-wider ${
-                  label === "Pending Pre-TCs"
-                    ? "text-red-600"
-                    : "text-muted-foreground"
+                "text-muted-foreground"
                 }`}
               >
                 {label}
               </p>
               <p
                 className={`mt-1 text-base font-semibold tracking-tight ${
-                  label === "Pending Pre-TCs" ? "text-red-700" : ""
+                ""
                 }`}
               >
                 {value}
@@ -263,10 +254,7 @@ export const DashboardReport = forwardRef<
               ["Calls Made", totals.callsMade],
               ["Calls Picked", totals.callsPicked],
               ["Pickup Rate", fmtPct(totals.pickupRate)],
-              ["AI Bot Pre-TCs", totals.preTc],
-              ["Pre-TC → TC", totals.preTcToTc],
-              ["Pending Pre-TCs", totals.pendingPreTc],
-              ["Direct TC", totals.directTc],
+              ["TCs Aligned", totals.directTc],
               [`TCs Lined Up on ${shortDate}`, totals.totalTcsLinedUp],
               ["TC Scheduled", totals.totalTcScheduled],
               ["TC Done", totals.totalTcDone],
@@ -296,11 +284,6 @@ export const DashboardReport = forwardRef<
                 label: "Pickup Rate",
                 value: totals.pickupRate,
                 tone: "bg-primary",
-              },
-              {
-                label: "Pre-TC → TC",
-                value: totals.preTcToTcRate,
-                tone: "bg-success",
               },
               {
                 label: "TC Completion Rate",
@@ -367,14 +350,7 @@ export const DashboardReport = forwardRef<
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <dt className="text-muted-foreground">Pre-TC → TC</dt>
-                    <dd className="font-semibold tabular-nums">
-                      {agent.preTcToTc}
-                    </dd>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <dt className="text-muted-foreground">Direct TC</dt>
+                    <dt className="text-muted-foreground">TCs Aligned</dt>
                     <dd className="font-semibold tabular-nums">
                       {agent.directTc}
                     </dd>

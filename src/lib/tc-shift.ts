@@ -1,7 +1,7 @@
 export type TcBookingStatus =
-  "Scheduled" | "Done" | "No-show" | "No Photos" | "Rescheduled" | "Unknown";
+  "Scheduled" | "Done" | "No-show" | "No Photos" | "Rescheduled" | "Cancelled" | "Unknown";
 
-export type TcImportSource = "scheduled" | "aligned";
+export type TcImportSource = "scheduled" | "aligned" | "manual";
 
 export type TcBooking = {
   source: TcImportSource;
@@ -16,6 +16,7 @@ export type TcBooking = {
   caseId: string;
   doctor: string;
   doctorEmail: string;
+  meetingUrl?: string;
   discoveryAgent: string;
   closureAgent: string;
   createdBy: string;
@@ -40,6 +41,7 @@ export type TcShiftMetrics = {
   noShow: number;
   noPhotos: number;
   rescheduled: number;
+  cancelled: number;
   unknown: number;
   rescheduleEvents: number;
   overdue: number;
@@ -62,7 +64,7 @@ export type TcShiftComparison = {
 };
 
 const BOOKING_HEADER =
-  /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2})\s+([A-Z][a-z]{2}),\s+(\d{1,2}:\d{2})\s+\(GMT([+-]\d{1,2}(?::\d{2})?)\)(?:\s*[·•]\s*(\d{1,2}:\d{2})\s+IST)?$/;
+  /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep(?:t)?|Oct|Nov|Dec),\s+(\d{1,2}:\d{2})\s+\(GMT([+-]\d{1,2}(?::\d{2})?)\)(?:\s*[·•]\s*(\d{1,2}:\d{2})\s+IST)?$/;
 
 const MONTHS: Record<string, number> = {
   Jan: 1,
@@ -74,6 +76,7 @@ const MONTHS: Record<string, number> = {
   Jul: 7,
   Aug: 8,
   Sep: 9,
+  Sept: 9,
   Oct: 10,
   Nov: 11,
   Dec: 12,
@@ -85,6 +88,7 @@ const STATUS_VALUES: TcBookingStatus[] = [
   "No-show",
   "No Photos",
   "Rescheduled",
+  "Cancelled",
 ];
 
 const normalizeLine = (line: string) =>
@@ -95,6 +99,9 @@ const normalizeLine = (line: string) =>
     .trim();
 
 const normalizeKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+const isLikelyCaseId = (value: string) =>
+  /^(?:CMA-)?\d{2,8}(?:[-\s]\d{3,10})+[A-Z]?$/i.test(value.trim());
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
@@ -211,9 +218,26 @@ function parseBlock(block: string[], source: TcImportSource, filterDate: string)
   const status = parseStatus(identityLines[cursor] ?? "");
   if (status !== "Unknown") cursor += 1;
 
-  const patientName = identityLines[cursor] ?? "";
-  const caseId = identityLines[cursor + 1] ?? "";
-  const doctor = identityLines[cursor + 2] ?? "";
+  // Some CRM rows contain an additional status tag (for example, "Rescheduled")
+  // before the patient's name. Locate the actual Case ID first, then use the
+  // closest non-status line before it as the patient name.
+  const caseIdIndex = identityLines.findIndex(
+    (line, index) => index >= cursor && isLikelyCaseId(line),
+  );
+  const caseId = caseIdIndex >= 0 ? identityLines[caseIdIndex] ?? "" : "";
+  const patientName =
+    caseIdIndex >= 0
+      ? identityLines
+          .slice(cursor, caseIdIndex)
+          .reverse()
+          .find((line) => line.toLowerCase() !== "past" && parseStatus(line) === "Unknown") ?? ""
+      : "";
+  // CRM may show informational tags such as "Duplicate", "Photos Received", or
+  // "Rescheduled" between the Case ID and doctor. Find the first doctor line
+  // after the patient identity instead of expecting it at one fixed position.
+  const doctor = identityLines
+    .slice(caseIdIndex >= 0 ? caseIdIndex + 1 : cursor + 2)
+    .find((line) => /^dr\.?\s+/i.test(line)) ?? "";
   if (!patientName || !caseId || !doctor.toLowerCase().startsWith("dr")) {
     return null;
   }
@@ -285,6 +309,7 @@ const statusPriority: Record<TcBookingStatus, number> = {
   Scheduled: 3,
   Unknown: 2,
   Rescheduled: 1,
+  Cancelled: 0,
 };
 
 export function effectiveBookings(bookings: TcBooking[]): TcBooking[] {
@@ -322,7 +347,9 @@ export function computeTcShiftMetrics(bookings: TcBooking[], now = Date.now()): 
   const count = (status: TcBookingStatus) =>
     effective.filter((booking) => booking.status === status).length;
   const done = count("Done");
-  const totalUnique = effective.length;
+  // Cancelled TCs remain visible, but are excluded from active operations and show-rate maths.
+  const active = effective.filter((booking) => booking.status !== "Cancelled");
+  const totalUnique = active.length;
   const scheduled = count("Scheduled");
   const overdue = effective.filter(
     (booking) => booking.status === "Scheduled" && bookingEndTimestamp(booking) <= now,
@@ -335,6 +362,7 @@ export function computeTcShiftMetrics(bookings: TcBooking[], now = Date.now()): 
     noShow: count("No-show"),
     noPhotos: count("No Photos"),
     rescheduled: count("Rescheduled"),
+    cancelled: count("Cancelled"),
     unknown: count("Unknown"),
     rescheduleEvents: bookings.filter((booking) => booking.status === "Rescheduled").length,
     overdue,
@@ -377,8 +405,8 @@ export function compareTcShiftSnapshots(
       changes.push(`${before.istTime} → ${after.istTime} IST`);
     if (normalizeKey(before.doctor) !== normalizeKey(after.doctor))
       changes.push(`${before.doctor} → ${after.doctor}`);
-    if (normalizeKey(before.discoveryAgent) !== normalizeKey(after.discoveryAgent))
-      changes.push(`Discovery: ${before.discoveryAgent || "—"} → ${after.discoveryAgent || "—"}`);
+    if (normalizeKey(before.createdBy) !== normalizeKey(after.createdBy))
+      changes.push(`Created by: ${before.createdBy || "—"} → ${after.createdBy || "—"}`);
     if (normalizeKey(before.closureAgent) !== normalizeKey(after.closureAgent))
       changes.push(`Closure: ${before.closureAgent || "—"} → ${after.closureAgent || "—"}`);
     if (changes.length)

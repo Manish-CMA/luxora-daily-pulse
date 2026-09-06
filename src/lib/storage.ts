@@ -108,9 +108,9 @@ function toSavedReports(rows: ReportRow[], entries: EntryRow[]): SavedReport[] {
         name: e.agent_name,
         callsMade: e.calls_made,
         callsPicked: e.calls_picked,
-        preTc: e.pre_tc,
-        preTcToTc: e.pre_tc_to_tc,
-        directTc: e.direct_tc,
+        preTc: 0,
+        preTcToTc: 0,
+        directTc: e.direct_tc + e.pre_tc_to_tc,
       }),
     );
     byReport.set(e.report_id, list);
@@ -231,36 +231,25 @@ export function getActiveRoster(): RosterAgent[] {
   return rosterCache.filter((r) => r.active);
 }
 
-export function saveRoster(list: RosterAgent[]) {
+export async function saveRoster(list: RosterAgent[]) {
   const removed = rosterCache.filter((r) => !list.some((n) => n.id === r.id));
-  rosterCache = list;
-  emit();
-  void (async () => {
-    try {
-      const { data: userData } = await supabase.auth.getUser();
-      const uid = userData.user?.id ?? null;
-      if (removed.length > 0)
-        await supabase
-          .from("agents")
-          .delete()
-          .in(
-            "id",
-            removed.map((r) => r.id),
-          );
-      if (list.length > 0)
-        await supabase.from("agents").upsert(
-          list.map((r) => ({
-            id: r.id,
-            name: r.name,
-            active: r.active,
-            created_by: uid,
-          })),
-        );
-      await refreshStore();
-    } catch (e) {
-      console.error("Failed to save agents", e);
-    }
-  })();
+  if (removed.length > 0) {
+    const { error } = await supabase
+      .from("agents")
+      .delete()
+      .in(
+        "id",
+        removed.map((r) => r.id),
+      );
+    if (error) throw error;
+  }
+  if (list.length > 0) {
+    const { error } = await supabase.from("agents").upsert(
+      list.map((r) => ({ id: r.id, name: r.name, active: r.active })),
+    );
+    if (error) throw error;
+  }
+  await refreshStore();
 }
 
 /** Build the daily entry rows from the roster, keeping any existing values. */
@@ -330,8 +319,8 @@ async function persistReport(report: SavedReport) {
         agent_name: a.name,
         calls_made: a.callsMade || 0,
         calls_picked: a.callsPicked || 0,
-        pre_tc: a.preTc || 0,
-        pre_tc_to_tc: a.preTcToTc || 0,
+        pre_tc: 0,
+        pre_tc_to_tc: 0,
         direct_tc: a.directTc || 0,
       })),
     );
@@ -428,7 +417,7 @@ export function validateReport(state: DashboardState): string[] {
   }
 
   const hasData = named.some(
-    (a) => a.callsMade || a.callsPicked || a.preTc || a.preTcToTc || a.directTc,
+    (a) => a.callsMade || a.callsPicked || a.directTc,
   );
 
   if (!hasData && !state.tcScheduled && !state.tcDone) {
@@ -451,7 +440,7 @@ export function validateReport(state: DashboardState): string[] {
   }
 
   for (const a of named) {
-    const values = [a.callsMade, a.callsPicked, a.preTc, a.preTcToTc, a.directTc];
+    const values = [a.callsMade, a.callsPicked, a.directTc];
 
     if (
       values.some(

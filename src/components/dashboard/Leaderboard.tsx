@@ -1,12 +1,4 @@
-import {
-  ArrowRightLeft,
-  ClipboardList,
-  Phone,
-  PhoneCall,
-  Star,
-  Trophy,
-  type LucideIcon,
-} from "lucide-react";
+import { Phone, PhoneCall, Star, Trophy, type LucideIcon } from "lucide-react";
 
 import {
   agentTcsLinedUp,
@@ -19,9 +11,7 @@ import {
 const ITEMS: { field: NumericField; title: string; icon: LucideIcon }[] = [
   { field: "callsMade", title: "Most Calls Made", icon: Phone },
   { field: "callsPicked", title: "Most Calls Picked", icon: PhoneCall },
-  { field: "preTc", title: "Most Pre-TCs", icon: ClipboardList },
-  { field: "preTcToTc", title: "Most Pre-TC → TC", icon: ArrowRightLeft },
-  { field: "directTc", title: "Most Direct TCs", icon: Star },
+  { field: "directTc", title: "Most TCs Aligned", icon: Star },
 ];
 
 const RANK_STYLES = [
@@ -30,8 +20,15 @@ const RANK_STYLES = [
   "border-orange-300 bg-orange-50/80 dark:border-orange-900/60 dark:bg-orange-950/20",
 ];
 
-export function Leaderboard({ agents }: { agents: Agent[] }) {
-  const rankedAgents = topPerformers(agents, 3);
+export function Leaderboard({ agents, rankStats = {} }: { agents: Agent[]; rankStats?: Record<string, { confirmed: number; photosReceived: number }> }) {
+  const rankedAgents = [...agents]
+    .filter((agent) => agentTcsLinedUp(agent) > 0 || agent.callsPicked > 0)
+    .sort((a, b) => {
+      const aStat = rankStats[a.id] ?? { confirmed: 0, photosReceived: 0 };
+      const bStat = rankStats[b.id] ?? { confirmed: 0, photosReceived: 0 };
+      return bStat.confirmed - aStat.confirmed || bStat.photosReceived - aStat.photosReceived || agentTcsLinedUp(b) - agentTcsLinedUp(a) || b.callsPicked - a.callsPicked;
+    })
+    .slice(0, 3);
 
   return (
     <div className="space-y-6">
@@ -83,16 +80,7 @@ export function Leaderboard({ agents }: { agents: Agent[] }) {
                   </div>
 
                   <div>
-                    <dt className="text-xs text-muted-foreground">
-                      Pre-TC → TC
-                    </dt>
-                    <dd className="font-semibold tabular-nums">
-                      {agent?.preTcToTc ?? 0}
-                    </dd>
-                  </div>
-
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Direct TC</dt>
+                    <dt className="text-xs text-muted-foreground">TCs Aligned</dt>
                     <dd className="font-semibold tabular-nums">
                       {agent?.directTc ?? 0}
                     </dd>

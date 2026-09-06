@@ -18,8 +18,6 @@ export type DashboardState = {
 export const NUMERIC_FIELDS = [
   "callsMade",
   "callsPicked",
-  "preTc",
-  "preTcToTc",
   "directTc",
 ] as const;
 
@@ -28,9 +26,7 @@ export type NumericField = (typeof NUMERIC_FIELDS)[number];
 export const COLUMNS: { key: NumericField; label: string }[] = [
   { key: "callsMade", label: "Calls Made" },
   { key: "callsPicked", label: "Calls Picked Up" },
-  { key: "preTc", label: "Pre-TC by AI Bot" },
-  { key: "preTcToTc", label: "Converted into TC by Agents" },
-  { key: "directTc", label: "Direct TC" },
+  { key: "directTc", label: "TCs Aligned" },
 ];
 
 export const DEFAULT_AGENT_NAMES = [
@@ -89,9 +85,7 @@ export type Totals = Record<NumericField, number> & {
   totalTcsLinedUp: number;
   totalTcScheduled: number;
   totalTcDone: number;
-  pendingPreTc: number;
   pickupRate: number;
-  preTcToTcRate: number;
   tcCompletionRate: number;
 };
 
@@ -105,8 +99,6 @@ export function computeTotals(
 
   const callsMade = sum("callsMade");
   const callsPicked = sum("callsPicked");
-  const preTc = sum("preTc");
-  const preTcToTc = sum("preTcToTc");
   const directTc = sum("directTc");
   const scheduled = Math.max(0, Number.isFinite(tcScheduled) ? tcScheduled : 0);
   const done = Math.max(0, Number.isFinite(tcDone) ? tcDone : 0);
@@ -116,24 +108,16 @@ export function computeTotals(
   return {
     callsMade,
     callsPicked,
-    preTc,
-    preTcToTc,
     directTc,
-    totalTcsLinedUp: preTcToTc + directTc,
+    totalTcsLinedUp: directTc,
     totalTcScheduled: scheduled,
     totalTcDone: done,
-    pendingPreTc: Math.max(0, preTc - preTcToTc),
     pickupRate: percentage(callsPicked, callsMade),
-    preTcToTcRate: percentage(preTcToTc, preTc),
     tcCompletionRate: percentage(done, scheduled),
   };
 }
 
-export const agentTcsLinedUp = (agent: Agent) =>
-  agent.preTcToTc + agent.directTc;
-
-export const agentPreTcLinedUp = (agent: Agent) =>
-  Math.max(0, agent.preTc - agent.preTcToTc);
+export const agentTcsLinedUp = (agent: Agent) => agent.directTc;
 
 /** Human team members with at least one recorded performance metric. */
 export function activeHumanAgents(agents: Agent[]): Agent[] {
@@ -145,13 +129,12 @@ export function activeHumanAgents(agents: Agent[]): Agent[] {
 }
 
 function hasPerformanceData(agent: Agent): boolean {
-  return agent.callsPicked > 0 || agent.preTcToTc > 0 || agent.directTc > 0;
+  return agent.callsPicked > 0 || agent.directTc > 0;
 }
 
 function compareAgentPerformance(a: Agent, b: Agent): number {
   return (
     agentTcsLinedUp(b) - agentTcsLinedUp(a) ||
-    b.preTcToTc - a.preTcToTc ||
     b.callsPicked - a.callsPicked ||
     a.name.localeCompare(b.name)
   );
@@ -202,8 +185,6 @@ export function aggregateAgents(rows: Agent[][]): Agent[] {
         name: trimmedName,
         callsMade: current.callsMade + (agent.callsMade || 0),
         callsPicked: current.callsPicked + (agent.callsPicked || 0),
-        preTc: current.preTc + (agent.preTc || 0),
-        preTcToTc: current.preTcToTc + (agent.preTcToTc || 0),
         directTc: current.directTc + (agent.directTc || 0),
       });
     }

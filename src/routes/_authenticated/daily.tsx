@@ -5,9 +5,6 @@ import {
   CalendarIcon,
   Phone,
   PhoneCall,
-  ClipboardList,
-  ArrowRightLeft,
-  Star,
   Percent,
   Trophy,
   LayoutDashboard,
@@ -73,6 +70,8 @@ import {
   validateReport,
   type SavedReport,
 } from "@/lib/storage";
+import { loadTcShiftSnapshots, type TcShiftSnapshot } from "@/lib/tc-shift-storage";
+import { computeTcShiftMetrics, effectiveBookings, type TcBooking } from "@/lib/tc-shift";
 
 export const Route = createFileRoute("/_authenticated/daily")({
   head: () => ({
@@ -111,6 +110,8 @@ function DailyPage() {
   const [saved, setSaved] = useState<SavedReport | null>(null);
   const [submittedBy, setSubmittedBy] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [tcSyncStatus, setTcSyncStatus] = useState("Checking TC Shift Monitor…");
+  const [rankStats, setRankStats] = useState<Record<string, { confirmed: number; photosReceived: number }>>({});
   const reportRef = useRef<HTMLDivElement>(null);
 
   const applySaved = useCallback((existing: SavedReport | undefined) => {
@@ -166,6 +167,80 @@ function DailyPage() {
 
   useEffect(() => {
     if (!hydrated || locked) return;
+    let cancelled = false;
+
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const matchingAgentId = (booking: TcBooking, agents: Agent[]) => {
+      const owner = booking.createdBy || booking.discoveryAgent;
+      const ownerKey = normalize(owner);
+      const bot = ownerKey.includes("bot");
+      return agents.find((agent) => {
+        const agentKey = normalize(agent.name);
+        return bot ? agentKey === "aibot" || agentKey.includes("bot") : agentKey === ownerKey;
+      })?.id;
+    };
+
+    const sync = async () => {
+      try {
+        const snapshots = await loadTcShiftSnapshots(state.date);
+        const snapshot: TcShiftSnapshot | null = snapshots.closing ?? snapshots.opening;
+        if (!snapshot) {
+          if (!cancelled) setTcSyncStatus("No TC Shift Monitor snapshot saved for this date.");
+          return;
+        }
+
+        const aligned = effectiveBookings(snapshot.scheduledBookings);
+        const metrics = computeTcShiftMetrics(snapshot.scheduledBookings);
+        const readStatuses = <T,>(key: string): Record<string, T> => {
+          try {
+            const value = window.localStorage.getItem(key);
+            return value ? (JSON.parse(value) as Record<string, T>) : {};
+          } catch {
+            return {};
+          }
+        };
+        const photos = readStatuses<"yes" | "no">(`luxora.tc-photo-status.${snapshot.shiftDate}`);
+        const confirmations = readStatuses<"confirmed" | "not-coming" | "no-response">(
+          `luxora.tc-confirmation-status.${snapshot.shiftDate}`,
+        );
+        if (cancelled) return;
+
+        setState((current) => {
+          if (current.date !== snapshot.shiftDate) return current;
+          const agents = current.agents.map((agent) => ({ ...agent, directTc: 0 }));
+          aligned.forEach((booking) => {
+            const id = matchingAgentId(booking, agents);
+            const agent = agents.find((candidate) => candidate.id === id);
+            if (agent) agent.directTc += 1;
+          });
+          return { ...current, agents, tcScheduled: metrics.totalUnique, tcDone: metrics.done };
+        });
+        const nextRankStats: Record<string, { confirmed: number; photosReceived: number }> = {};
+        aligned.forEach((booking) => {
+          const id = matchingAgentId(booking, state.agents);
+          if (!id) return;
+          const stat = nextRankStats[id] ?? { confirmed: 0, photosReceived: 0 };
+          if (confirmations[booking.caseId] === "confirmed") stat.confirmed += 1;
+          if (photos[booking.caseId] === "yes") stat.photosReceived += 1;
+          nextRankStats[id] = stat;
+        });
+        setRankStats(nextRankStats);
+        setTcSyncStatus(
+          `Synced from ${snapshot.phase === "closing" ? "Closing" : "Opening"} Snapshot · ${aligned.length} TCs assigned by Created by`,
+        );
+      } catch {
+        if (!cancelled) setTcSyncStatus("TC Shift Monitor data could not be loaded.");
+      }
+    };
+
+    void sync();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, locked, state.date]);
+
+  useEffect(() => {
+    if (!hydrated || locked) return;
     localStorage.setItem(DRAFT_KEY, JSON.stringify(state));
   }, [state, hydrated, locked]);
 
@@ -173,7 +248,15 @@ function DailyPage() {
     () => computeTotals(state.agents, state.tcScheduled, state.tcDone),
     [state.agents, state.tcScheduled, state.tcDone],
   );
-  const top = useMemo(() => topPerformer(state.agents), [state.agents]);
+  const top = useMemo(() => {
+    return [...state.agents]
+      .filter((agent) => agentTcsLinedUp(agent) > 0 || agent.callsPicked > 0)
+      .sort((a, b) => {
+        const aStat = rankStats[a.id] ?? { confirmed: 0, photosReceived: 0 };
+        const bStat = rankStats[b.id] ?? { confirmed: 0, photosReceived: 0 };
+        return bStat.confirmed - aStat.confirmed || bStat.photosReceived - aStat.photosReceived || agentTcsLinedUp(b) - agentTcsLinedUp(a) || b.callsPicked - a.callsPicked;
+      })[0] ?? null;
+  }, [state.agents, rankStats]);
   const status = submitted ? reportStatus(saved) : "draft";
 
   const updateAgent = useCallback((id: string, patch: Partial<Agent>) => {
@@ -492,7 +575,7 @@ function DailyPage() {
             <div className="flex h-10 items-center rounded-xl border border-border bg-secondary/50 px-3 text-sm font-semibold tabular-nums">
               {totals.totalTcsLinedUp}
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                Pre-TC → TC + Direct TC
+                All TCs aligned by the team or bot
               </span>
             </div>
           </div>
@@ -502,7 +585,9 @@ function DailyPage() {
           agents={state.agents}
           onChange={updateAgent}
           readOnly={locked}
+          rankStats={rankStats}
         />
+        <p className="-mt-5 text-xs text-muted-foreground">{tcSyncStatus}</p>
 
         <section className="rounded-2xl border border-border bg-card p-5 shadow-soft">
           <div>
@@ -510,7 +595,7 @@ function DailyPage() {
               Daily TC Totals
             </h2>
             <p className="text-xs text-muted-foreground">
-              Enter one total for the entire team. No agent assignment.
+              Automatically synced from the TC Shift Monitor for this date.
             </p>
           </div>
 
@@ -522,7 +607,7 @@ function DailyPage() {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 min={0}
-                readOnly={locked}
+                readOnly
                 value={String(state.tcScheduled ?? 0)}
                 onChange={(event) =>
                   updateTcTotal("tcScheduled", event.target.value)
@@ -538,7 +623,7 @@ function DailyPage() {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 min={0}
-                readOnly={locked}
+                readOnly
                 value={String(state.tcDone ?? 0)}
                 onChange={(event) =>
                   updateTcTotal("tcDone", event.target.value)
@@ -568,34 +653,15 @@ function DailyPage() {
               tone="primary"
             />
             <KpiCard
-              label="Total Pre-TCs"
-              value={totals.preTc}
-              icon={ClipboardList}
-              tone="default"
-            />
-            <KpiCard
-              label="Pending Pre-TC"
-              value={totals.pendingPreTc}
-              sub="Pre-TC not yet converted"
-              icon={ClipboardList}
-              tone="warning"
-            />
-            <KpiCard
-              label="Pre-TC → TC"
-              value={totals.preTcToTc}
-              icon={ArrowRightLeft}
-              tone="success"
-            />
-            <KpiCard
-              label="Direct TC"
+              label="TCs Aligned"
               value={totals.directTc}
-              icon={Star}
-              tone="warning"
+              icon={Target}
+              tone="success"
             />
             <KpiCard
               label="Total TCs Lined Up"
               value={totals.totalTcsLinedUp}
-              sub="Pre-TC → TC + Direct TC"
+              sub="All sources combined"
               icon={Target}
               tone="default"
             />
@@ -621,13 +687,6 @@ function DailyPage() {
               sub="Calls Picked / Calls Made"
               icon={Percent}
               tone="primary"
-            />
-            <KpiCard
-              label="Pre-TC → TC Rate"
-              value={fmtPct(totals.preTcToTcRate)}
-              sub="Pre-TC→TC / Pre-TC"
-              icon={Percent}
-              tone="success"
             />
             <KpiCard
               label="TC Completion Rate"
@@ -660,10 +719,6 @@ function DailyPage() {
                     <b className="text-foreground">{agentTcsLinedUp(top)}</b>
                   </span>
                   <span>
-                    Pre-TC → TC:{" "}
-                    <b className="text-foreground">{top.preTcToTc}</b>
-                  </span>
-                  <span>
                     <PhoneCall className="mr-1 inline size-3.5" />
                     Calls Picked:{" "}
                     <b className="text-foreground">{top.callsPicked}</b>
@@ -683,7 +738,7 @@ function DailyPage() {
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Daily Leaderboard
           </h2>
-          <Leaderboard agents={state.agents} />
+          <Leaderboard agents={state.agents} rankStats={rankStats} />
         </section>
       </main>
 

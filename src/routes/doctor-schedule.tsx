@@ -265,7 +265,7 @@ function DoctorSchedulePage() {
               <table className="w-full min-w-[850px] border-collapse text-sm">
                 <thead>
                   <tr className="bg-secondary/60 text-left">
-                    {["IST", "Patient", "Case ID", "Doctor", "Discovery", "Closure", "Status"].map(
+                    {["IST", "Patient", "Case ID", "Doctor", "Created by", "Closure", "Status"].map(
                       (label) => (
                         <th
                           key={label}
@@ -298,7 +298,7 @@ function DoctorSchedulePage() {
                           {booking.caseId}
                         </td>
                         <td className="px-4 py-3">{booking.doctor}</td>
-                        <td className="px-4 py-3">{booking.discoveryAgent || "—"}</td>
+                        <td className="px-4 py-3">{booking.createdBy || "—"}</td>
                         <td className="px-4 py-3">{booking.closureAgent || "—"}</td>
                         <td className="px-4 py-3">
                           <Badge

@@ -8,7 +8,6 @@ import {
   COLUMNS,
   agentTcsLinedUp,
   computeTotals,
-  topPerformers,
   type Agent,
   type NumericField,
 } from "@/lib/dashboard";
@@ -17,6 +16,7 @@ type AgentTableProps = {
   agents: Agent[];
   onChange: (id: string, patch: Partial<Agent>) => void;
   readOnly?: boolean;
+  rankStats?: Record<string, { confirmed: number; photosReceived: number }>;
 };
 
 const safeValue = (value: unknown) =>
@@ -33,14 +33,36 @@ export function AgentTable({
   agents,
   onChange,
   readOnly = false,
+  rankStats = {},
 }: AgentTableProps) {
   const totals = useMemo(() => computeTotals(agents), [agents]);
-  const ranked = useMemo(() => topPerformers(agents, agents.length), [agents]);
-  const ranks = useMemo(
-    () => new Map(ranked.map((agent, index) => [agent.id, index + 1])),
-    [ranked],
+  const ranked = useMemo(
+    () =>
+      [...agents]
+        .filter((agent) => {
+          const stat = rankStats[agent.id];
+          return agent.callsPicked > 0 || agentTcsLinedUp(agent) > 0 || (stat?.confirmed ?? 0) > 0 || (stat?.photosReceived ?? 0) > 0;
+        })
+        .sort((a, b) => {
+          const aStat = rankStats[a.id] ?? { confirmed: 0, photosReceived: 0 };
+          const bStat = rankStats[b.id] ?? { confirmed: 0, photosReceived: 0 };
+          return bStat.confirmed - aStat.confirmed || bStat.photosReceived - aStat.photosReceived || agentTcsLinedUp(b) - agentTcsLinedUp(a) || b.callsPicked - a.callsPicked;
+        }),
+    [agents, rankStats],
   );
-  const topId = ranked[0]?.id;
+  const ranks = useMemo(() => {
+    const result = new Map<string, number>();
+    let previous = "";
+    let rank = 0;
+    ranked.forEach((agent, index) => {
+      const stat = rankStats[agent.id] ?? { confirmed: 0, photosReceived: 0 };
+      const score = `${stat.confirmed}|${stat.photosReceived}|${agentTcsLinedUp(agent)}|${agent.callsPicked}`;
+      if (score !== previous) rank = index + 1;
+      result.set(agent.id, rank);
+      previous = score;
+    });
+    return result;
+  }, [ranked, rankStats]);
 
   const updateMetric = (
     agentId: string,
@@ -59,7 +81,7 @@ export function AgentTable({
             Agent Performance Entry
           </h2>
           <p className="text-xs text-muted-foreground">
-            Calls, Pre-TCs and agent conversions only.
+            Enter calls manually. TCs Aligned is synced from TC Shift Monitor.
           </p>
         </div>
 
@@ -100,7 +122,7 @@ export function AgentTable({
           <tbody>
             {agents.map((agent) => {
               const rank = ranks.get(agent.id);
-              const isTop = agent.id === topId;
+              const isTop = ranks.get(agent.id) === 1;
 
               return (
                 <tr
@@ -132,7 +154,7 @@ export function AgentTable({
                         inputMode="numeric"
                         pattern="[0-9]*"
                         min={0}
-                        readOnly={readOnly}
+                        readOnly={readOnly || column.key === "directTc"}
                         aria-label={`${agent.name} ${column.label}`}
                         value={String(safeValue(agent[column.key]))}
                         onChange={(event) =>

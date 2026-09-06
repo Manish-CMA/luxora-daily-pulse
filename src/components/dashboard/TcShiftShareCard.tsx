@@ -14,6 +14,9 @@ type Props = {
   alignedToday: number;
   privacyMode: boolean;
   importedAt?: string;
+  photoStatuses?: Record<string, "yes" | "no">;
+  confirmationStatuses?: Record<string, "confirmed" | "not-coming" | "no-response">;
+  showPktTime?: boolean;
 };
 
 const formatDate = (iso: string) =>
@@ -29,19 +32,37 @@ const statusClass: Record<string, string> = {
   "No-show": "bg-red-100 text-red-700",
   "No Photos": "bg-amber-100 text-amber-700",
   Rescheduled: "bg-violet-100 text-violet-700",
+  Cancelled: "bg-slate-200 text-slate-700",
   Scheduled: "bg-blue-100 text-blue-700",
   Unknown: "bg-slate-100 text-slate-600",
 };
 
+const formatPktTime = (booking: TcBooking) =>
+  new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Karachi",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(`${booking.istDate}T${booking.istTime}:00+05:30`));
+
 export const TcShiftShareCard = forwardRef<HTMLDivElement, Props>(function TcShiftShareCard(
-  { shiftDate, bookings, alignedToday, privacyMode, importedAt },
+  {
+    shiftDate,
+    bookings,
+    alignedToday,
+    privacyMode,
+    importedAt,
+    photoStatuses = {},
+    confirmationStatuses = {},
+    showPktTime = true,
+  },
   ref,
 ) {
   const rows = effectiveBookings(bookings);
   const metrics = computeTcShiftMetrics(bookings);
 
   return (
-    <div ref={ref} className="w-[1080px] bg-slate-50 p-8 text-slate-900">
+    <div ref={ref} className="w-[1280px] bg-slate-50 p-8 text-slate-900">
       <header className="flex items-end justify-between rounded-3xl bg-blue-600 px-8 py-7 text-white">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-100">
@@ -79,7 +100,7 @@ export const TcShiftShareCard = forwardRef<HTMLDivElement, Props>(function TcShi
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-slate-600">
             <CalendarClock className="size-4 text-blue-600" />
-            Today’s TC Timeline — IST
+            Today’s TC Timeline — {showPktTime ? "IST & PKT" : "IST"}
           </h2>
           <p className="text-xs text-slate-500">{rows.length} unique cases</p>
         </div>
@@ -88,12 +109,15 @@ export const TcShiftShareCard = forwardRef<HTMLDivElement, Props>(function TcShi
           <thead>
             <tr className="bg-slate-100 text-left text-[10px] uppercase tracking-wider text-slate-500">
               <th className="w-20 px-4 py-3">IST</th>
+              {showPktTime ? <th className="w-20 px-3 py-3">PKT</th> : null}
               <th className="w-44 px-3 py-3">Patient</th>
               <th className="w-36 px-3 py-3">Case ID</th>
               <th className="w-40 px-3 py-3">Doctor</th>
-              <th className="w-32 px-3 py-3">Discovery</th>
+              <th className="w-32 px-3 py-3">Created by</th>
               <th className="w-32 px-3 py-3">Closure</th>
               <th className="w-28 px-3 py-3">Status</th>
+              <th className="w-28 px-3 py-3">Photos</th>
+              <th className="w-36 px-3 py-3">TC confirmation</th>
             </tr>
           </thead>
           <tbody>
@@ -102,6 +126,11 @@ export const TcShiftShareCard = forwardRef<HTMLDivElement, Props>(function TcShi
                 <td className="px-4 py-3 font-semibold tabular-nums text-blue-700">
                   {booking.istTime}
                 </td>
+                {showPktTime ? (
+                  <td className="px-3 py-3 font-semibold tabular-nums text-blue-700">
+                    {formatPktTime(booking)}
+                  </td>
+                ) : null}
                 <td className="truncate px-3 py-3 font-medium">
                   {privacyMode ? firstName(booking.patientName) : booking.patientName}
                 </td>
@@ -109,7 +138,7 @@ export const TcShiftShareCard = forwardRef<HTMLDivElement, Props>(function TcShi
                   {privacyMode ? maskCaseId(booking.caseId) : booking.caseId}
                 </td>
                 <td className="truncate px-3 py-3">{booking.doctor}</td>
-                <td className="truncate px-3 py-3">{booking.discoveryAgent || "—"}</td>
+                <td className="truncate px-3 py-3">{booking.createdBy || "—"}</td>
                 <td className="truncate px-3 py-3">{booking.closureAgent || "—"}</td>
                 <td className="px-3 py-3">
                   <span
@@ -117,6 +146,22 @@ export const TcShiftShareCard = forwardRef<HTMLDivElement, Props>(function TcShi
                   >
                     {booking.status}
                   </span>
+                </td>
+                <td className="px-3 py-3 text-[11px] font-medium text-slate-700">
+                  {photoStatuses[booking.caseId] === "yes"
+                    ? "Yes"
+                    : photoStatuses[booking.caseId] === "no"
+                      ? "No"
+                      : "Not marked"}
+                </td>
+                <td className="px-3 py-3 text-[11px] font-medium text-slate-700">
+                  {confirmationStatuses[booking.caseId] === "confirmed"
+                    ? "Confirmed"
+                    : confirmationStatuses[booking.caseId] === "not-coming"
+                      ? "Not coming"
+                      : confirmationStatuses[booking.caseId] === "no-response"
+                        ? "No response"
+                        : "Pending"}
                 </td>
               </tr>
             ))}
